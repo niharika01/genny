@@ -18,8 +18,8 @@
 #include <ratio>
 #include <thread>
 
+#include <gennylib/GlobalRateLimiter.hpp>
 #include <gennylib/PhaseLoop.hpp>
-#include <gennylib/v1/GlobalRateLimiter.hpp>
 
 #include <testlib/ActorHelper.hpp>
 #include <testlib/clocks.hpp>
@@ -54,8 +54,8 @@ TEST_CASE("Global rate limiter") {
 
     const int64_t per = 3;
     const int64_t burst = 2;
-    const RateSpec rs{per, burst};  // 2 operations per 3 ticks.
-    v1::BaseGlobalRateLimiter<MyDummyClock> grl{rs};
+    const BaseRateSpec rs{per, burst};  // 2 operations per 3 ticks.
+    BaseGlobalRateLimiter<MyDummyClock> grl{rs};
 
     SECTION("Limits Rate") {
         grl.resetLastEmptied();
@@ -77,6 +77,55 @@ TEST_CASE("Global rate limiter") {
             REQUIRE(grl.consumeIfWithinRate(now));
         }
         REQUIRE(!grl.consumeIfWithinRate(now));
+    }
+}
+
+TEST_CASE("Percentile rate limiting") {
+    struct DummyTemplateValue {};
+    using MyDummyClock = DummyClock<DummyTemplateValue>;
+
+    const int64_t percent = 50;  // 50%
+    const PercentileRateSpec rs{percent};
+    BaseGlobalRateLimiter<MyDummyClock> grl{rs};
+    grl.addUser();
+
+    SECTION("Limits Rate") {
+        grl.resetLastEmptied();
+        auto now = MyDummyClock::now();
+
+        // consumeIfWithinRate() should succeed because we allow as many ops as desired until
+        // limiting.
+        for (int i = 0; i < 9; i++) {
+            REQUIRE(grl.consumeIfWithinRate(now));
+            grl.notifyOfIteration();
+        }
+
+        // Increment the clock by a minute.
+        MyDummyClock::nowRaw += grl._nsPerMinute;
+        // Tenth call sets the rate limit.
+        REQUIRE(grl.consumeIfWithinRate(now));
+        // Now we should only be able to call exactly half as many times.
+        now = MyDummyClock::now();
+        for (int i = 0; i < 5; i++) {
+            REQUIRE(grl.consumeIfWithinRate(now));
+        }
+        REQUIRE(!grl.consumeIfWithinRate(now));
+
+        // Then it works again a minute later.
+        MyDummyClock::nowRaw += grl._nsPerMinute;
+        now = MyDummyClock::now();
+        for (int i = 0; i < 5; i++) {
+            REQUIRE(grl.consumeIfWithinRate(now));
+        }
+        REQUIRE(!grl.consumeIfWithinRate(now));
+
+        // Then starting a new phase clears the limit.
+        grl.resetLastEmptied();
+        now = MyDummyClock::now();
+        for (int i = 0; i < 10; i++) {
+            REQUIRE(grl.consumeIfWithinRate(now));
+            grl.notifyOfIteration();
+        }
     }
 }
 
@@ -125,10 +174,10 @@ auto resetState() {
 
 auto incProducer = std::make_shared<DefaultActorProducer<IncActor>>("IncActor");
 
-TEST_CASE("Global rate limiter can be used by phase loop", "[benchmark]") {
+TEST_CASE("Global rate limiter can be used by phase loop", "[slow][benchmark]") {
     using namespace std::chrono_literals;
 
-    SECTION("Fail if no Repeat or Duration") {
+    SECTION("Works with no Repeat or Duration") {
         NodeSource ns(R"(
 SchemaVersion: 2018-07-01
 Actors:
@@ -136,17 +185,47 @@ Actors:
   Type: IncActor
   Threads: 1
   Phases:
-    - GlobalRate: 5 per 4 seconds
-      Blocking: None
+    - Duration: 520 milliseconds 
+      GlobalRate: 7 per 50 milliseconds
+    - Duration: 520 milliseconds 
+      GlobalRate: 8 per 10000 milliseconds
+
+- Name: Two
+  Type: IncActor
+  Threads: 1
+  Phases:
+    - Blocking: None
+      GlobalRate: 7 per 50 milliseconds
+
+      # When the phase ends the rate limit is reset and all threads
+      # are immediately woken up.
+    - Blocking: None
+      GlobalRate: 8 per 1000 milliseconds
 )",
                       "");
         auto& config = ns.root();
         int num_threads = 2;
 
-        auto fun = [&]() {
-            genny::ActorHelper ah{config, num_threads, {{"IncActor", incProducer}}};
-        };
-        REQUIRE_THROWS_WITH(fun(), Matches(R"(.*alongside either Duration or Repeat.*)"));
+        resetState();
+        REQUIRE(getCurState() == 0);
+
+        genny::ActorHelper ah{config, num_threads, {{"IncActor", incProducer}}};
+        auto runInBg = [&ah]() { ah.run(); };
+        std::thread t(runInBg);
+        t.join();
+
+        const auto state = getCurState();
+        
+        // We may run the GlobalRate ops more or fewer, based on the randomness of thread
+        // wakeup times coinciding with phase endings for non-blocking operations.
+        // This is expected, so we can account for it by allowing more or fewer recurrence
+        // around the "expected" value of 156.
+        // (Including both actors and phases able to have timings off by an entire cycle.)
+        const auto expected = 156;
+        const auto maxCount = expected + 8 * 4;
+        const auto minCount = expected - 8 * 4;
+        REQUIRE(state <= maxCount);
+        REQUIRE(state >= minCount);
     }
 
     // The rate interval needs to be large enough to avoid sporadic failures, which makes
@@ -235,6 +314,7 @@ Actors:
   Phases:
   - GlobalRate: 3 per 500 milliseconds
     Duration: 1200 milliseconds
+
 )",
                       "");
         auto& config = ns.root();

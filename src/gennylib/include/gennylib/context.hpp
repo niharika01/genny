@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <boost/log/trivial.hpp>
 #include <boost/noncopyable.hpp>
 #include <boost/throw_exception.hpp>
 
@@ -34,11 +35,11 @@
 #include <gennylib/ActorProducer.hpp>
 #include <gennylib/ActorVector.hpp>
 #include <gennylib/Cast.hpp>
+#include <gennylib/GlobalRateLimiter.hpp>
 #include <gennylib/InvalidConfigurationException.hpp>
 #include <gennylib/Node.hpp>
 #include <gennylib/Orchestrator.hpp>
 #include <gennylib/conventions.hpp>
-#include <gennylib/v1/GlobalRateLimiter.hpp>
 #include <gennylib/v1/PoolManager.hpp>
 
 #include <metrics/metrics.hpp>
@@ -59,6 +60,11 @@ namespace v1 {
 class HasNode {
 public:
     explicit HasNode(const Node& node) : _node{node} {}
+
+    template <typename... Args>
+    auto& get(Args&&... args) const {
+        return this->_node.operator[](std::forward<Args>(args)...);
+    }
 
     template <typename... Args>
     auto& operator[](Args&&... args) const {
@@ -173,11 +179,19 @@ public:
     }
 
     /**
-     * Get a WorkloadContext-unique ActorId
-     * @return The next sequential id
+     * Claim a set of WorkloadContext-unique ActorIds.
+     * The caller is expected to use actorIds from
+     * the returned value (inclusive), to the returned
+     * value + numIds (exclusive).
+     *
+     * Not thread-safe.
+     *
+     * @return The first id owned by the caller.
      */
-    ActorId nextActorId() {
-        return _nextActorId++;
+    ActorId claimActorIds(size_t numIds) {
+        auto toReturn = _nextWorkloadActorId.fetch_add(numIds);
+        _constructRngsToId(_nextWorkloadActorId);
+        return toReturn;
     }
 
     /**
@@ -230,12 +244,9 @@ public:
     /**
      * Access global rate-limiters.
      *
-     * @warning
-     *   This is intended to only be used internally. It is called
-     *   by PhaseLoop in response to the `GlobalRate:` yaml keyword.
-     *   Additionally it cannot be called after the WorkloadContext
-     *   has been constructed: it can only be called during Actors'
-     *   constructors, etc.
+     * It is called by PhaseLoop in response to the `GlobalRate:` yaml keyword. Additionally it
+     * cannot be called after the WorkloadContext has been constructed: it can only be called during
+     * Actors' constructors, etc.
      *
      * @param name
      *   name/id to use
@@ -248,7 +259,7 @@ public:
      *
      * @private
      */
-    v1::GlobalRateLimiter* getRateLimiter(const std::string& name, const RateSpec& spec);
+    GlobalRateLimiter* getRateLimiter(const std::string& name, const RateSpec& spec);
 
     metrics::Registry& getMetrics() {
         return _registry;
@@ -262,30 +273,31 @@ private:
     static ActorVector _constructActors(const Cast& cast,
                                         const std::unique_ptr<ActorContext>& contexts);
 
+    void _constructRngsToId(ActorId id);
+
     metrics::Registry _registry;
     Orchestrator* _orchestrator;
 
     v1::PoolManager _poolManager;
 
+    // We start at 1 because, if we send ID 0 to Poplar, the field
+    // gets used as a monotonically-increasing value.
+    std::atomic<ActorId> _nextWorkloadActorId{1};
+
     // we own the child ActorContexts
     std::vector<std::unique_ptr<ActorContext>> _actorContexts;
     ActorVector _actors;
-    DefaultRandom _rng;
 
     // Indicate that we are doing building the context. This is used to gate certain methods that
     // should not be called after construction.
     bool _done = false;
 
-    // Actors should always be constructed in a single-threaded context.
-    // That said, atomic integral types are very cheap to work with.
-    //
-    // We start at 1 because, if we send ID 0 to Poplar, the field
-    // gets used as a monotonically-increasing value.
-    std::atomic<ActorId> _nextActorId{1};
+    // Deque instead of vector to prevent references from being deleted when reallocating.
+    std::deque<DefaultRandom> _rngRegistry;
+    DefaultRandom _seedGenerator;
 
-    std::unordered_map<ActorId, DefaultRandom> _rngRegistry;
-
-    std::unordered_map<std::string, std::unique_ptr<v1::GlobalRateLimiter>> _rateLimiters;
+    std::unordered_map<std::string, std::unique_ptr<GlobalRateLimiter>> _rateLimiters;
+    std::mutex _limiterLock;
 };
 
 // For some reason need to decl this; see impl below
@@ -326,6 +338,8 @@ public:
     ActorContext(const Node& node, WorkloadContext& workloadContext)
         : v1::HasNode{node}, _workload{&workloadContext}, _phaseContexts{} {
         _phaseContexts = constructPhaseContexts(_node, this);
+        auto threads = (*this)["Threads"].maybe<int>().value_or(1);
+        _nextActorId = this->workload().claimActorIds(threads);
     }
 
     // no copy or move
@@ -333,6 +347,13 @@ public:
     void operator=(ActorContext&) = delete;
     ActorContext(ActorContext&&) = delete;
     void operator=(ActorContext&&) = delete;
+
+    /**
+     * @return the next actor id
+     */
+    ActorId nextActorId() {
+        return _nextActorId++;
+    }
 
     /**
      * @return top-level workload configuration
@@ -415,10 +436,11 @@ public:
      *
      * @param operationName the name of the operation being run.
      * @param id the id of this Actor.
+     * @param internal whether this operation is Genny-internal.
      */
-    auto operation(const std::string& operationName, ActorId id) const {
+    auto operation(const std::string& operationName, ActorId id, bool internal = false) const {
         return this->_workload->_registry.operation(
-            this->_node["Name"].to<std::string>(), operationName, id);
+            this->_node["Name"].to<std::string>(), operationName, id, std::nullopt, internal);
     }
 
 private:
@@ -428,6 +450,23 @@ private:
 
     WorkloadContext* _workload;
     std::unordered_map<PhaseNumber, std::unique_ptr<PhaseContext>> _phaseContexts;
+
+    std::atomic<ActorId> _nextActorId;
+};
+
+/**
+ * Helper class that provides functions needed to sleep in the current phase.
+ */
+class SleepContext {
+public:
+    SleepContext(PhaseNumber phase, const Orchestrator& orchestrator)
+        : _phase{phase}, _orchestrator{orchestrator} {}
+
+    void sleep_for(Duration sleep_duration) const;
+
+private:
+    PhaseNumber _phase;
+    const Orchestrator& _orchestrator;
 };
 
 /**
@@ -464,6 +503,10 @@ public:
         return *_actor;
     }
 
+    SleepContext getSleepContext() const {
+        return SleepContext(_phaseNumber, this->actor().orchestrator());
+    }
+
     /**
      * Convenience method for creating a metrics::Operation that's unique for this phase and thread.
      *
@@ -473,8 +516,9 @@ public:
      * @param defaultMetricName the default name of the metric if "MetricsName" is not specified
      *                          for a phase in the workload YAML.
      * @param id the id of this Actor.
+     * @param internal whether this operation is Genny-internal.
      */
-    auto operation(const std::string& defaultMetricsName, ActorId id) const {
+    auto operation(const std::string& defaultMetricsName, ActorId id, bool internal = false) const {
         std::ostringstream stm;
         if (auto metricsName = this->_node["MetricsName"].maybe<std::string>()) {
             stm << *metricsName;
@@ -483,7 +527,11 @@ public:
         }
 
         return this->workload()._registry.operation(
-            this->_actor->operator[]("Name").to<std::string>(), stm.str(), id, _phaseNumber);
+            this->_actor->operator[]("Name").to<std::string>(),
+            stm.str(),
+            id,
+            _phaseNumber,
+            internal);
     }
 
     const auto getPhaseNumber() const {

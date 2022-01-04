@@ -1,5 +1,9 @@
 SchemaVersion: 2018-07-01
 Owner: Storage Engines
+Description: |
+  Basic workload to test/document the long lived reader actor, which utilizes the multi collection
+  query actor under the hood. This actor reads a set of long lived collections over a period of
+  time.
 
 Clients:
   Default:
@@ -40,14 +44,14 @@ Actors:
     - keys: {x7: 1}
     - keys: {x8: 1}
   - {Nop: true}
-      
+
 - Name: LongLivedIndexReader
   Type: MultiCollectionQuery
   Threads: 100
-  GlobalRate: 10 per 1 second
   Phases:
   - {Nop: true}
   - Duration: 3 minutes
+    GlobalRate: 10 per 1 second
     Database: *DB
     CollectionCount: *CollectionCount
     DocumentCount: *DocumentCount
@@ -57,11 +61,11 @@ Actors:
 - Name: LongLivedReader
   Type: MultiCollectionQuery
   Threads: 100
-  GlobalRate: 10 per 1 second
   Phases:
   - {Nop: true}
   - Duration: 3 minutes
     Database: *DB
+    GlobalRate: 10 per 1 second
     CollectionCount: *CollectionCount
     DocumentCount: *DocumentCount
     Threads: 10

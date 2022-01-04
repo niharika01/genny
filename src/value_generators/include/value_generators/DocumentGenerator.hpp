@@ -36,11 +36,64 @@ public:
     using std::invalid_argument::invalid_argument;
 };
 
+/**
+ * Throw this to indicate a bad date format is received.
+ */
+class InvalidDateFormat : public InvalidValueGeneratorSyntax {
+public:
+    using InvalidValueGeneratorSyntax::InvalidValueGeneratorSyntax;
+};
+
+/**
+ * Throw this to indicate no parser can be found for a generator.
+ */
+class UnknownParserException : public InvalidValueGeneratorSyntax {
+public:
+    using InvalidValueGeneratorSyntax::InvalidValueGeneratorSyntax;
+};
+
+struct GeneratorArgs {
+    DefaultRandom& rng;
+    ActorId actorId;
+};
+
+
+template <class T>
+class Generator;
+
+template <class T>
+using UniqueGenerator = std::unique_ptr<Generator<T>>;
+
+template <class T>
+class TypeGenerator {
+public:
+    // if this works, pass in Node, phase context, and actor ID and just specialize the constructors
+    // Then replace the helper functions below with typedefs
+    explicit TypeGenerator(UniqueGenerator<T> impl) : _impl{std::move(impl)} {}
+    T evaluate();
+
+    // Moves are okay
+    TypeGenerator(TypeGenerator<T>&&) noexcept;
+    TypeGenerator<T>& operator=(TypeGenerator<T>&&) noexcept;
+
+    // But no copies
+    TypeGenerator(const TypeGenerator<T>&) = delete;
+    TypeGenerator& operator=(const TypeGenerator<T>&) = delete;
+
+    ~TypeGenerator();
+
+private:
+    UniqueGenerator<T> _impl;
+};
+
+TypeGenerator<int64_t> makeIntGenerator(const Node& node, GeneratorArgs generatorArgs);
+TypeGenerator<double> makeDoubleGenerator(const Node& node, GeneratorArgs generatorArgs);
+
 class DocumentGenerator {
 public:
     explicit DocumentGenerator(const Node& node, PhaseContext& phaseContext, ActorId id);
     explicit DocumentGenerator(const Node& node, ActorContext& phaseContext, ActorId id);
-    explicit DocumentGenerator(const Node& node, DefaultRandom& rng);
+    explicit DocumentGenerator(const Node& node, GeneratorArgs generatorArgs);
     /**
      * @return a document according to the template given by the node in the constructor.
      */

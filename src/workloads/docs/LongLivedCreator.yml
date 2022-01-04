@@ -1,5 +1,8 @@
 SchemaVersion: 2018-07-01
 Owner: Storage Engines
+Description: |
+  Basic workload to test/document the long lived creator actor which utilizes the loader actor to
+  create and populate a set of long lived collections.
 
 Clients:
   Default:
@@ -40,4 +43,3 @@ Actors:
     - keys: {x7: 1}
     - keys: {x8: 1}
   - {Nop: true}
-      

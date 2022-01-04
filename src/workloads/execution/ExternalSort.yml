@@ -1,5 +1,10 @@
 SchemaVersion: 2018-07-01
 Owner: "@mongodb/query"
+Description: >
+  Measures the performance of sort operations that spill to disk. Each benchmarked operation
+  exercises the external sort algorithm by running a query that sorts a large collection without an
+  index. Using an 'executionStats' explain causes each command to run its execution plan until no
+  documents remain, which ensures that the sort algorithm executes in its entirety.
 
 Actors:
 - Name: InsertData
@@ -98,5 +103,10 @@ Actors:
           executionStats
 
 AutoRun:
-  Requires:
-    mongodb_setup: [standalone]
+- When:
+    mongodb_setup:
+      $eq: standalone
+    branch_name:
+      $neq:
+      - v4.0
+      - v4.2

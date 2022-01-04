@@ -30,35 +30,86 @@
 #include <gennylib/context.hpp>
 
 #include <value_generators/DocumentGenerator.hpp>
+#include <bsoncxx/builder/stream/document.hpp>
 
 namespace genny::actor {
 
 /** @private */
-using index_type = std::pair<DocumentGenerator, std::optional<DocumentGenerator>>;
+using index_type = std::tuple<DocumentGenerator, std::optional<DocumentGenerator>, std::string>;
+using namespace bsoncxx;
 
 /** @private */
 struct Loader::PhaseConfig {
-    PhaseConfig(PhaseContext& context, mongocxx::pool::entry& client, uint thread, ActorId id)
+    PhaseConfig(PhaseContext& context,
+                mongocxx::pool::entry& client,
+                uint thread,
+                size_t totalThreads,
+                ActorId id)
         : database{(*client)[context["Database"].to<std::string>()]},
-          // The next line uses integer division. The Remainder is accounted for below.
-          numCollections{context["CollectionCount"].to<IntegerSpec>() /
-                         context["Threads"].to<IntegerSpec>()},
+          multipleThreadsPerCollection{
+              context["MultipleThreadsPerCollection"].maybe<bool>().value_or(false)},
+          // The next line uses integer division for non multithreaded configurations.
+          // The Remainder is accounted for below.
+          numCollections{multipleThreadsPerCollection
+                             ? 1
+                             : context["CollectionCount"].to<IntegerSpec>() /
+                                 context["Threads"].to<IntegerSpec>()},
           numDocuments{context["DocumentCount"].to<IntegerSpec>()},
           batchSize{context["BatchSize"].to<IntegerSpec>()},
           documentExpr{context["Document"].to<DocumentGenerator>(context, id)},
-          collectionOffset{numCollections * thread} {
-        auto& indexNodes = context["Indexes"];
-        for (auto [k, indexNode] : indexNodes) {
-            indexes.emplace_back(indexNode["keys"].to<DocumentGenerator>(context, id),
-                                 indexNode["options"].maybe<DocumentGenerator>(context, id));
-        }
-        if (thread == context["Threads"].to<int>() - 1) {
-            // Pick up any extra collections left over by the division
-            numCollections += context["CollectionCount"].to<uint>() % context["Threads"].to<uint>();
+          collectionOffset{multipleThreadsPerCollection
+                               ? thread % context["CollectionCount"].to<IntegerSpec>()
+                               : numCollections * thread} {
+        auto createIndexes = [&]() {
+            auto& indexNodes = context["Indexes"];
+            for (auto [k, indexNode] : indexNodes) {
+                std::string indexName = "";
+                for (auto [key, value] : indexNode["keys"]) {
+                    auto key_value = key.toString() + "_" + value.to<std::string>();
+                    indexName = indexName.empty() ? key_value : indexName + "_" + key_value;
+                }
+                indexes.emplace_back(
+                    indexNode["keys"].to<DocumentGenerator>(context, id),
+                    indexNode["options"].maybe<DocumentGenerator>(context, id),
+                    indexNode["options"]["name"].maybe<std::string>().value_or(indexName)
+                );
+            }
+        };
+
+        if (multipleThreadsPerCollection) {
+            if (context["Threads"]) {
+                BOOST_THROW_EXCEPTION(InvalidConfigurationException(
+                    "Phase Config 'Threads' parameter is not supported if "
+                    "'MultipleThreadsPerCollection' is true."));
+            }
+            uint collectionCount = context["CollectionCount"].to<IntegerSpec>();
+            if (totalThreads % collectionCount != 0) {
+                std::ostringstream ss;
+                ss << "'CollectionCount' (" << collectionCount
+                   << ") must be an even divisor of 'Threads' (" << totalThreads << ").";
+                BOOST_THROW_EXCEPTION(InvalidConfigurationException(ss.str()));
+            }
+            uint numThreads = totalThreads / collectionCount;
+            numDocuments = context["DocumentCount"].to<int64_t>() / numThreads;
+            if (thread / collectionCount == 0) {
+                // The first thread for each collection:
+                //   1. Picks up any extra documents left over by the division.
+                //   2. Is responsible for creating the indexes.
+                numDocuments += context["DocumentCount"].to<uint>() % numThreads;
+                createIndexes();
+            }
+        } else {
+            createIndexes();
+            if (thread == context["Threads"].to<int>() - 1) {
+                // Pick up any extra collections left over by the division
+                numCollections +=
+                    context["CollectionCount"].to<uint>() % context["Threads"].to<uint>();
+            }
         }
     }
 
     mongocxx::database database;
+    bool multipleThreadsPerCollection;
     int64_t numCollections;
     int64_t numDocuments;
     int64_t batchSize;
@@ -76,6 +127,9 @@ void genny::actor::Loader::run() {
                 auto collectionName = "Collection" + std::to_string(i);
                 auto collection = config->database[collectionName];
                 // Insert the documents
+                BOOST_LOG_TRIVIAL(info)
+                    << "Starting to insert: " << config->numDocuments << " docs "
+                    << "into " << collectionName;
                 uint remainingInserts = config->numDocuments;
                 {
                     auto totalOpCtx = _totalBulkLoad.start();
@@ -98,38 +152,51 @@ void genny::actor::Loader::run() {
                     }
                     totalOpCtx.success();
                 }
-                // For each index
-                for (auto&& [keys, options] : config->indexes) {
-                    // Make the index
+                // Make the index
+                bool _indexReq = false;
+                builder::stream::document builder{};
+                auto indexCmd = builder << "createIndexes" << collectionName
+                                        <<  "indexes" << builder::stream::open_array;
+                for (auto&& [keys, options, indexName] : config->indexes) {
+                    _indexReq = true;
                     auto indexKey = keys();
-                    BOOST_LOG_TRIVIAL(debug)
-                        << "Building index " << bsoncxx::to_json(indexKey.view());
                     if (options) {
                         auto indexOptions = (*options)();
-                        BOOST_LOG_TRIVIAL(debug)
-                            << "With options " << bsoncxx::to_json(indexOptions.view());
-                        auto indexOpCtx = _indexBuild.start();
-                        collection.create_index(std::move(indexKey), std::move(indexOptions));
-                        indexOpCtx.success();
+                        indexCmd = indexCmd << builder::stream::open_document
+                                            << "key" << indexKey.view()
+                                            << "name" << indexName
+                                            << builder::concatenate(indexOptions.view())
+                                            << builder::stream::close_document;
+
                     } else {
-                        auto indexOpCtx = _indexBuild.start();
-                        collection.create_index(std::move(indexKey));
-                        indexOpCtx.success();
+                        indexCmd = indexCmd << builder::stream::open_document
+                                            << "key" << indexKey.view()
+                                            << "name" << indexName
+                                            << builder::stream::close_document;
                     }
                 }
+                auto doc = indexCmd << builder::stream::close_array << builder::stream::finalize;
+                if (_indexReq) {
+                    BOOST_LOG_TRIVIAL(debug)
+                            << "Building index" << to_json(doc.view());
+                    auto indexOpCtx = _indexBuild.start();
+                    config->database.run_command(doc.view());
+                    indexOpCtx.success();
+                }
+                BOOST_LOG_TRIVIAL(info) << "Done with load phase. All " << config->numDocuments
+                                        << " documents loaded into " << collectionName;
             }
-            BOOST_LOG_TRIVIAL(info) << "Done with load phase. All documents loaded";
         }
     }
 }
 
-Loader::Loader(genny::ActorContext& context, uint thread)
+Loader::Loader(genny::ActorContext& context, uint thread, size_t totalThreads)
     : Actor(context),
       _totalBulkLoad{context.operation("TotalBulkInsert", Loader::id())},
       _individualBulkLoad{context.operation("IndividualBulkInsert", Loader::id())},
       _indexBuild{context.operation("IndexBuild", Loader::id())},
       _client{std::move(context.client())},
-      _loop{context, _client, thread, Loader::id()} {}
+      _loop{context, _client, thread, totalThreads, Loader::id()} {}
 
 class LoaderProducer : public genny::ActorProducer {
 public:
@@ -139,8 +206,9 @@ public:
             return {};
         }
         genny::ActorVector out;
-        for (uint i = 0; i < context["Threads"].to<int>(); ++i) {
-            out.emplace_back(std::make_unique<genny::actor::Loader>(context, i));
+        uint totalThreads = context["Threads"].to<int>();
+        for (uint i = 0; i < totalThreads; ++i) {
+            out.emplace_back(std::make_unique<genny::actor::Loader>(context, i, totalThreads));
         }
         return out;
     }

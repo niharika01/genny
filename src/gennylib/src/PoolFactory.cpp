@@ -31,7 +31,7 @@ namespace genny::v1 {
 /** @private */
 struct PoolFactory::Config {
     Config(std::string_view uri) {
-        const auto protocolRegex = std::regex("^(mongodb://|mongodb+srv://)?(([^:@]*):([^@]*)@)?");
+        const auto protocolRegex = std::regex("^(mongodb://|mongodb\\+srv://)?(([^:@]*):([^@]*)@)?");
         const auto hostRegex = std::regex("^,?([^:,/]+(:[0-9]+)?)");
         const auto dbRegex = std::regex("^/([^?]*)\\??");
         const auto queryRegex = std::regex("^&?([^=&]*)=([^&]*)");
@@ -72,6 +72,11 @@ struct PoolFactory::Config {
             queryOptions[key] = value;
             i += matches.length();
         }
+
+        // Hardcode Genny appName
+        // The appName is not strictly a query option and the queryOptions can be renamed if we
+        // intend to continue to use for generic key value pairs in the URI
+        queryOptions["appName"] = "Genny";
     }
 
     auto makeUri() const {
@@ -187,28 +192,28 @@ std::string PoolFactory::makeUri() const {
 }
 
 mongocxx::options::pool PoolFactory::makeOptions() const {
-    mongocxx::options::ssl sslOptions;
+    mongocxx::options::tls tlsOptions;
 
     auto allowInv = _config->getFlag(OptionType::kAccessOption, "AllowInvalidCertificates");
     if (allowInv) {
-        BOOST_LOG_TRIVIAL(debug) << "Allowing invalid certificates for SSL/TLS";
-        sslOptions = sslOptions.allow_invalid_certificates(true);
+        BOOST_LOG_TRIVIAL(debug) << "Allowing invalid certificates for TLS";
+        tlsOptions = tlsOptions.allow_invalid_certificates(true);
     }
 
     // Just doing CAFile and PEMKeyFile for now, it's reasonably trivial to add other options
     // Note that this is entering as a BSON string view, so you cannot delete the config object
     auto caFile = *_config->get(OptionType::kAccessOption, "CAFile");
     if (!caFile.empty()) {
-        BOOST_LOG_TRIVIAL(debug) << "Using CA file '" << caFile << "' for SSL/TLS";
-        sslOptions = sslOptions.ca_file(caFile.data());
+        BOOST_LOG_TRIVIAL(debug) << "Using CA file '" << caFile << "' for TLS";
+        tlsOptions = tlsOptions.ca_file(caFile.data());
     }
 
     auto pemKeyFile = *_config->get(OptionType::kAccessOption, "PEMKeyFile");
     if (!pemKeyFile.empty()) {
-        BOOST_LOG_TRIVIAL(debug) << "Using PEM Key file '" << pemKeyFile << "' for SSL/TLS";
-        sslOptions = sslOptions.pem_file(pemKeyFile.data());
+        BOOST_LOG_TRIVIAL(debug) << "Using PEM Key file '" << pemKeyFile << "' for TLS";
+        tlsOptions = tlsOptions.pem_file(pemKeyFile.data());
     }
-    return mongocxx::options::client{}.ssl_opts(sslOptions);
+    return mongocxx::options::client{}.tls_opts(tlsOptions);
 }
 
 std::unique_ptr<mongocxx::pool> PoolFactory::makePool() const {
@@ -219,10 +224,10 @@ std::unique_ptr<mongocxx::pool> PoolFactory::makePool() const {
 
     auto poolOptions = mongocxx::options::pool{};
 
-    auto useSsl = _config->getFlag(OptionType::kQueryOption, "ssl");
-    if (useSsl) {
+    auto useTls = _config->getFlag(OptionType::kQueryOption, "tls");
+    if (useTls) {
         poolOptions = makeOptions();
-        BOOST_LOG_TRIVIAL(debug) << "Adding ssl options to pool...";
+        BOOST_LOG_TRIVIAL(debug) << "Adding tls options to pool...";
     }
 
     // option::client can be implicitly coverted into option::pool. This is to be able to set the
@@ -239,6 +244,10 @@ std::unique_ptr<mongocxx::pool> PoolFactory::makePool() const {
 
 void PoolFactory::setOption(OptionType type, const std::string& option, std::string value) {
     _config->set(type, option, value);
+}
+
+void PoolFactory::overrideHosts(const std::set<std::string>& hosts) {
+    _config->hosts = hosts;
 }
 
 void PoolFactory::setOptionFromInt(OptionType type, const std::string& option, int32_t value) {

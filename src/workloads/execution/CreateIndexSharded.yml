@@ -1,5 +1,7 @@
 SchemaVersion: 2018-07-01
 Owner: "@mongodb/sharding"
+Description: |
+  TODO: TIG-3320
 
 Actors:
 - Name: EnableSharding
@@ -21,7 +23,6 @@ Actors:
   - *Nop
   - *Nop
   - *Nop
-  - *Nop
 
 - Name: ShardCollection
   Type: AdminCommand
@@ -34,10 +35,9 @@ Actors:
     - OperationMetricsName: ShardCollection
       OperationName: AdminCommand
       OperationCommand:
-        shardCollection: test.Collection0 # Collection0 is the default collection populated by the Loader.
+        shardCollection: test.Collection0  # Collection0 is the default collection populated by the Loader.
         key:
           _id: hashed
-  - *Nop
   - *Nop
   - *Nop
   - *Nop
@@ -52,12 +52,11 @@ Actors:
   Phases:
   - *Nop
   - *Nop
-  - ExternalPhaseConfig:
+  - LoadConfig:
       Path: ../../phases/execution/CreateIndexPhase.yml
       Key: InsertData
       Parameters:
         db: *db
-  - *Nop
   - *Nop
   - *Nop
   - *Nop
@@ -72,44 +71,43 @@ Actors:
   - *Nop
   - *Nop
   - *Nop
-  - ExternalPhaseConfig:
+  - LoadConfig:
       Path: ../../phases/execution/CreateIndexPhase.yml
       Key: Create2dIndexesCmd
       Parameters:
         Duration: 5 minutes
-  - ExternalPhaseConfig:
+  - LoadConfig:
       Path: ../../phases/execution/CreateIndexPhase.yml
       Key: Create2dSphereIndexesCoordCmd
       Parameters:
         Duration: 5 minutes
-  - ExternalPhaseConfig:
+  - LoadConfig:
       Path: ../../phases/execution/CreateIndexPhase.yml
       Key: Create2dSphereGeoJsonIndexesCmd
       Parameters:
         Duration: 5 minutes
-  - ExternalPhaseConfig:
-      Path: ../../phases/execution/CreateIndexPhase.yml
-      Key: CreateGeoHaystackIndexesCmd
-      Parameters:
-        Duration: 5 minutes
-  - ExternalPhaseConfig:
+  - LoadConfig:
       Path: ../../phases/execution/CreateIndexPhase.yml
       Key: CreateHashedIndexesCmd
       Parameters:
         Duration: 5 minutes
-  - ExternalPhaseConfig:
+  - LoadConfig:
       Path: ../../phases/execution/CreateIndexPhase.yml
       Key: CreateTextIndexesCmd
       Parameters:
         Duration: 5 minutes
-  - ExternalPhaseConfig:
+  - LoadConfig:
       Path: ../../phases/execution/CreateIndexPhase.yml
       Key: CreateWildCardIndexesCmd
       Parameters:
         Duration: 5 minutes
 
 AutoRun:
-  Requires:
+- When:
     mongodb_setup:
-    - shard
-    - shard-lite
+      $eq:
+      - shard
+      - shard-lite
+    branch_name:
+      $neq:
+      - v4.0

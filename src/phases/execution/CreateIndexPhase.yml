@@ -1,7 +1,9 @@
 # This Phase has 2 actors, InsertData and IndexCollection. InsertData inserts documents containing all types of indexes, and IndexCollection creates indexes for each of them, one at a time.
 
-PhaseSchemaVersion: 2018-07-01
+SchemaVersion: 2018-07-01
 Owner: "@mongodb/server-execution"
+Description: |
+  TODO: TIG-3322
 
 InsertData:
   Repeat: 1
@@ -77,27 +79,6 @@ Create2dSphereGeoJsonIndexesCmd:
     OperationCommand:
       dropIndexes: Collection0
       index: 2dsphereGeoJsonIndex
-
-CreateGeoHaystackIndexesCmd:
-  Repeat: {^Parameter: {Name: "Repeat", Default: 5}}
-  Duration: {^Parameter: {Name: "Duration", Default: 60 seconds}}
-  Database: *db
-  Operations:
-  - OperationMetricsName: CreateGeoHaystackIndexesCmd
-    OperationName: RunCommand
-    OperationCommand:
-      createIndexes: Collection0
-      indexes:
-      - key:
-          loc2d: "geoHaystack"
-          randomString: 1
-        bucketSize: 5
-        name: geoHaystackIndex
-  - OperationMetricsName: DropCreatedGeoHaystackIndexesCmd
-    OperationName: RunCommand
-    OperationCommand:
-      dropIndexes: Collection0
-      index: geoHaystackIndex
 
 CreateHashedIndexesCmd:
   Repeat: {^Parameter: {Name: "Repeat", Default: 5}}

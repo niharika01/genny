@@ -1,5 +1,8 @@
 SchemaVersion: 2018-07-01
-Owner: "@mongodb/stm"
+Owner: "@10gen/dev-prod-tips"
+Description: |
+  This is an introductory workload that shows how to write a workload in Genny.
+  This workload writes a few messages to the screen.
 
 Actors:
 - Name: HelloWorld
@@ -14,14 +17,22 @@ Actors:
     # MetricsName: 🐳Message
   - Message: Hello Phase 1 👬
     Repeat: 100
-  - ExternalPhaseConfig:
+    # To limit the throughput to a percentage of the max, specify global rate as a percent.
+    # This will run at max throughput for 1 minute or 3 iterations, whichever is longer,
+    # then limit to a fraction of that for the rest of the phase.
+    # GlobalRate: 80%
+  - LoadConfig:
       Path: ../../phases/HelloWorld/ExamplePhase2.yml
       Key: UseMe  # Only load the YAML structure from this top-level key.
       Parameters:
         Repeat: 2
 
-# Metrics output format and location can be specified as ftdc-based for workloads
-# that are expected to collect over 1 million data points.
-# Metrics:
-#   Format: ftdc
-#   Path: build/genny-metrics
+# As an alternate phase syntax, use the following for an actor that
+# runs a total of 3 phases, active in phases named 0 and 2 and Nop for the rest:
+# Phases:
+#   OnlyActiveInPhases:
+#     Active: [0, 2]
+#     NopInPhasesUpTo: 2
+#     PhaseConfig:
+#       Message: Alternate Phase 1
+#       Repeat: 100

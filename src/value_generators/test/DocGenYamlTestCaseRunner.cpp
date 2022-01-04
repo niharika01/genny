@@ -1,15 +1,9 @@
-#include <algorithm>
-#include <iosfwd>
 #include <iostream>
 #include <memory>
 #include <string>
-#include <vector>
 
-#include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/json.hpp>
-#include <bsoncxx/types/value.hpp>
 
-#include <testlib/ActorHelper.hpp>
 #include <testlib/yamlTest.hpp>
 #include <testlib/yamlToBson.hpp>
 
@@ -17,10 +11,6 @@
 #include <value_generators/DocumentGenerator.hpp>
 
 namespace genny {
-
-namespace {
-genny::DefaultRandom rng;
-}  // namespace
 
 class ValGenTestCase {
 public:
@@ -31,6 +21,7 @@ public:
           _name{node["Name"].as<std::string>("No Name")},
           _givenTemplate{node["GivenTemplate"]},
           _thenReturns{node["ThenReturns"]},
+          _thenExecuteAndIgnore{node["ThenExecuteAndIgnore"]},
           _expectedExceptionMessage{node["ThenThrows"]} {
         if (!_givenTemplate) {
             std::stringstream msg;
@@ -42,6 +33,18 @@ public:
             msg << "Can't have ThenReturns and ThenThrows in '" << toString(node) << "'";
             throw std::invalid_argument(msg.str());
         }
+        if (_thenExecuteAndIgnore && _expectedExceptionMessage) {
+            std::stringstream msg;
+            msg << "Can't have ThenExecuteAndIgnore and ThenThrows in '" << toString(node) << "'";
+            throw std::invalid_argument(msg.str());
+        }
+        if (_thenReturns && _thenExecuteAndIgnore) {
+            std::stringstream msg;
+            msg << "Can't have ThenReturns and ThenExecuteAndIgnore in '" << toString(node) << "'";
+            throw std::invalid_argument(msg.str());
+        }
+
+
         if (_thenReturns) {
             if (!_thenReturns.IsSequence()) {
                 std::stringstream msg;
@@ -49,14 +52,21 @@ public:
                 throw std::invalid_argument(msg.str());
             }
             _runMode = RunMode::kExpectReturn;
-        } else {
-            if (!_expectedExceptionMessage) {
-                std::stringstream msg;
-                msg << "Need ThenThrows if no ThenReturns in '" << toString(node) << "'";
-                throw std::invalid_argument(msg.str());
-            }
-            _runMode = RunMode::kExpectException;
+            return;
         }
+        if (_thenExecuteAndIgnore) {
+            _runMode = RunMode::kIgnoreReturn;
+            return;
+        }
+        if (_expectedExceptionMessage) {
+            _runMode = RunMode::kExpectException;
+            return;
+        }
+
+        std::stringstream msg;
+        msg << "Need one of ThenReturns, ThenExecuteAndIgnore or ThenThrows'" << toString(node)
+            << "'";
+        throw std::invalid_argument(msg.str());
     }
 
     static NodeSource toNode(YAML::Node node) {
@@ -68,7 +78,10 @@ public:
             if (_runMode == RunMode::kExpectException) {
                 try {
                     NodeSource ns = toNode(this->_givenTemplate);
-                    genny::DocumentGenerator(ns.root(), rng);
+                    genny::DefaultRandom rng;
+
+                    auto docGen = genny::DocumentGenerator(ns.root(), GeneratorArgs{rng, 1});
+                    docGen();
                     FAIL("Expected exception " << this->_expectedExceptionMessage.as<std::string>()
                                                << " but none occurred");
                 } catch (const std::exception& x) {
@@ -77,29 +90,35 @@ public:
                 }
                 return;
             }
-
             NodeSource ns = toNode(this->_givenTemplate);
-            auto docGen = genny::DocumentGenerator(ns.root(), rng);
+            genny::DefaultRandom rng;
+            auto docGen = genny::DocumentGenerator(ns.root(), GeneratorArgs{rng, 2});
+            if (_runMode == RunMode::kIgnoreReturn)
+                return;
             for (const auto&& nextValue : this->_thenReturns) {
                 auto expected = testing::toDocumentBson(nextValue);
                 auto actual = docGen();
-                REQUIRE(toString(expected.view()) == toString(actual.view()));
+                // After implementing TIG-2839 uncomment the line below and remove the two lines
+                // underneath it as it is a workaround suggested in HELP-21664
+                // REQUIRE(toString(expected.view()) == toString(actual.view()));
+                auto expectedFix = bsoncxx::from_json(toString(expected.view()));
+                INFO("Expected = \n"
+                     << toString(expectedFix.view()) << "\nActual = \n"
+                     << toString(actual.view()));
+                REQUIRE(toString(expectedFix.view()) == toString(actual.view()));
             }
         }
     }
 
-    const std::string name() const {
+    [[nodiscard]] std::string name() const {
         return _name;
-    }
-
-    const YAML::Node givenTemplate() const {
-        return _givenTemplate;
     }
 
 private:
     enum class RunMode {
         kExpectException,
         kExpectReturn,
+        kIgnoreReturn,
     };
 
     RunMode _runMode = RunMode::kExpectException;
@@ -109,6 +128,7 @@ private:
     YAML::Node _wholeTest;
     YAML::Node _givenTemplate;
     YAML::Node _thenReturns;
+    YAML::Node _thenExecuteAndIgnore;
     YAML::Node _expectedExceptionMessage;
 };
 

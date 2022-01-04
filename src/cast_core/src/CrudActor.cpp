@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <cast_core/actors/CrudActor.hpp>
+#include <cast_core/actors/OptionsConversion.hpp>
 
 #include <chrono>
 #include <memory>
@@ -25,195 +26,18 @@
 #include <boost/throw_exception.hpp>
 
 #include <bsoncxx/json.hpp>
+#include <bsoncxx/string/to_string.hpp>
 
 #include <gennylib/Cast.hpp>
 #include <gennylib/MongoException.hpp>
 #include <gennylib/context.hpp>
 #include <gennylib/conventions.hpp>
+#include <value_generators/DefaultRandom.hpp>
+#include <value_generators/DocumentGenerator.hpp>
 
 using BsonView = bsoncxx::document::view;
 using CrudActor = genny::actor::CrudActor;
-
-namespace YAML {
-
-template <>
-struct convert<mongocxx::options::aggregate> {
-    using AggregateOptions = mongocxx::options::aggregate;
-    static Node encode(const AggregateOptions& rhs) {
-        return {};
-    }
-
-    static bool decode(const Node& node, AggregateOptions& rhs) {
-        if (!node.IsMap()) {
-            return false;
-        }
-        rhs = mongocxx::options::aggregate{};
-        if (node["AllowDiskUse"]) {
-            auto allowDiskUse = node["AllowDiskUse"].as<bool>();
-            rhs.allow_disk_use(allowDiskUse);
-        }
-        if (node["BatchSize"]) {
-            auto batchSize = node["BatchSize"].as<int>();
-            rhs.batch_size(batchSize);
-        }
-        if (node["MaxTime"]) {
-            auto maxTime = node["MaxTime"].as<genny::TimeSpec>();
-            rhs.max_time(std::chrono::milliseconds(maxTime));
-        }
-        if (node["ReadPreference"]) {
-            auto readPreference = node["ReadPreference"].as<mongocxx::read_preference>();
-            rhs.read_preference(readPreference);
-        }
-        if (node["BypassDocumentValidation"]) {
-            auto bypassValidation = node["BypassDocumentValidation"].as<bool>();
-            rhs.bypass_document_validation(bypassValidation);
-        }
-        if (node["Hint"]) {
-            auto h = node["Hint"].as<std::string>();
-            auto hint = mongocxx::hint(h);
-            rhs.hint(hint);
-        }
-        if (node["WriteConcern"]) {
-            auto wc = node["WriteConcern"].as<mongocxx::write_concern>();
-            rhs.write_concern(wc);
-        }
-        return true;
-    }
-};
-
-template <>
-struct convert<mongocxx::options::bulk_write> {
-    using BulkWriteOptions = mongocxx::options::bulk_write;
-    static Node encode(const BulkWriteOptions& rhs) {
-        return {};
-    }
-
-    static bool decode(const Node& node, BulkWriteOptions& rhs) {
-        if (!node.IsMap()) {
-            return false;
-        }
-        if (node["BypassDocumentValidation"]) {
-            auto bypassDocValidation = node["BypassDocumentValidation"].as<bool>();
-            rhs.bypass_document_validation(bypassDocValidation);
-        }
-        if (node["Ordered"]) {
-            auto isOrdered = node["Ordered"].as<bool>();
-            rhs.ordered(isOrdered);
-        }
-        if (node["WriteConcern"]) {
-            auto wc = node["WriteConcern"].as<mongocxx::write_concern>();
-            rhs.write_concern(wc);
-        }
-        return true;
-    }
-};
-
-template <>
-struct convert<mongocxx::options::count> {
-    using CountOptions = mongocxx::options::count;
-    static Node encode(const CountOptions& rhs) {
-        return {};
-    }
-
-    static bool decode(const Node& node, CountOptions& rhs) {
-        if (!node.IsMap()) {
-            return false;
-        }
-        if (node["Hint"]) {
-            auto h = node["Hint"].as<std::string>();
-            auto hint = mongocxx::hint(h);
-            rhs.hint(hint);
-        }
-        if (node["Limit"]) {
-            auto limit = node["Limit"].as<int>();
-            rhs.limit(limit);
-        }
-        if (node["MaxTime"]) {
-            auto maxTime = node["MaxTime"].as<genny::TimeSpec>();
-            rhs.max_time(std::chrono::milliseconds{maxTime});
-        }
-        if (node["ReadPreference"]) {
-            auto readPref = node["ReadPreference"].as<mongocxx::read_preference>();
-            rhs.read_preference(readPref);
-        }
-        return true;
-    }
-};
-
-template <>
-struct convert<mongocxx::options::estimated_document_count> {
-    using CountOptions = mongocxx::options::estimated_document_count;
-    static Node encode(const CountOptions& rhs) {
-        return {};
-    }
-
-    static bool decode(const Node& node, CountOptions& rhs) {
-        if (!node.IsMap()) {
-            return false;
-        }
-        if (node["MaxTime"]) {
-            auto maxTime = node["MaxTime"].as<genny::TimeSpec>();
-            rhs.max_time(std::chrono::milliseconds{maxTime});
-        }
-        if (node["ReadPreference"]) {
-            auto readPref = node["ReadPreference"].as<mongocxx::read_preference>();
-            rhs.read_preference(readPref);
-        }
-        return true;
-    }
-};
-
-
-template <>
-struct convert<mongocxx::options::insert> {
-    static Node encode(const mongocxx::options::insert& rhs) {
-        return {};
-    }
-    static bool decode(const Node& node, mongocxx::options::insert& rhs) {
-        if (!node.IsMap()) {
-            return false;
-        }
-        if (node["Ordered"]) {
-            rhs.ordered(node["Ordered"].as<bool>());
-        }
-        if (node["BypassDocumentValidation"]) {
-            rhs.bypass_document_validation(node["BypassDocumentValidation"].as<bool>());
-        }
-        if (node["WriteConcern"]) {
-            rhs.write_concern(node["WriteConcern"].as<mongocxx::write_concern>());
-        }
-
-        return true;
-    }
-};
-
-template <>
-struct convert<mongocxx::options::transaction> {
-    using TransactionOptions = mongocxx::options::transaction;
-    static Node encode(const TransactionOptions& rhs) {
-        return {};
-    }
-
-    static bool decode(const Node& node, TransactionOptions& rhs) {
-        if (!node.IsMap()) {
-            return false;
-        }
-        if (node["WriteConcern"]) {
-            auto wc = node["WriteConcern"].as<mongocxx::write_concern>();
-            rhs.write_concern(wc);
-        }
-        if (node["ReadConcern"]) {
-            auto rc = node["ReadConcern"].as<mongocxx::read_concern>();
-            rhs.read_concern(rc);
-        }
-        if (node["ReadPreference"]) {
-            auto rp = node["ReadPreference"].as<mongocxx::read_preference>();
-            rhs.read_preference(rp);
-        }
-        return true;
-    }
-};
-}  // namespace YAML
+using bsoncxx::type;
 
 namespace {
 
@@ -222,13 +46,22 @@ using namespace genny;
 enum class ThrowMode {
     kSwallow,
     kRethrow,
+    kSwallowAndRecord,  // Record failed operations but don't throw.
 };
 
 ThrowMode decodeThrowMode(const Node& operation, PhaseContext& phaseContext) {
-    static const char* key = "ThrowOnFailure";
+    static const char* throwKey = "ThrowOnFailure";
+    // TODO: TIG-2805 Remove this mode once the underlying drivers issue is addressed.
+    static const char* ignoreKey = "RecordFailure";
 
-    bool throwOnFailure =
-        operation[key] ? operation[key].to<bool>() : phaseContext[key].maybe<bool>().value_or(true);
+    bool throwOnFailure = operation[throwKey] ? operation[throwKey].to<bool>()
+                                              : phaseContext[throwKey].maybe<bool>().value_or(true);
+    bool ignoreFailure = operation[ignoreKey]
+        ? operation[ignoreKey].to<bool>()
+        : phaseContext[ignoreKey].maybe<bool>().value_or(false);
+    if (ignoreFailure) {
+        return ThrowMode::kSwallowAndRecord;
+    }
     return throwOnFailure ? ThrowMode::kRethrow : ThrowMode::kSwallow;
 }
 
@@ -260,6 +93,10 @@ struct BaseOperation {
             if (throwMode == ThrowMode::kRethrow) {
                 ctx.failure();
                 BOOST_THROW_EXCEPTION(MongoException(x, info ? info->view() : emptyDoc.view()));
+            } else if (throwMode == ThrowMode::kSwallowAndRecord) {
+                // Record the failure but don't throw.
+                ctx.failure();
+                return;
             }
         }
         ctx.success();
@@ -275,6 +112,8 @@ using OpCallback = std::function<std::unique_ptr<BaseOperation>(const Node&,
                                                                 metrics::Operation,
                                                                 PhaseContext& context,
                                                                 ActorId id)>;
+
+std::unordered_map<std::string, OpCallback&> getOpConstructors();
 
 struct WriteOperation : public BaseOperation {
     WriteOperation(PhaseContext& phaseContext, const Node& operation)
@@ -317,9 +156,9 @@ struct CreateIndexOperation : public BaseOperation {
 
         this->doBlock(_operation, [&](metrics::OperationContext& ctx) {
             _onSession
-                ? _collection.create_index(keys.view(), indexOptions.view(), _operationOptions)
-                : _collection.create_index(
-                      session, keys.view(), indexOptions.view(), _operationOptions);
+                ? _collection.create_index(
+                      session, keys.view(), indexOptions.view(), _operationOptions)
+                : _collection.create_index(keys.view(), indexOptions.view(), _operationOptions);
             return std::make_optional(std::move(keys));
         });
     }
@@ -379,7 +218,9 @@ struct UpdateOneOperation : public WriteOperation {
           _collection{std::move(collection)},
           _operation{operation},
           _filter{opNode["Filter"].to<DocumentGenerator>(context, id)},
-          _update{opNode["Update"].to<DocumentGenerator>(context, id)} {}
+          _update{opNode["Update"].to<DocumentGenerator>(context, id)},
+          _options{opNode["OperationOptions"].maybe<mongocxx::options::update>().value_or(
+              mongocxx::options::update{})} {}
 
     mongocxx::model::write getModel() override {
         auto filter = _filter();
@@ -466,7 +307,9 @@ struct DeleteOneOperation : public WriteOperation {
           _onSession{onSession},
           _collection{std::move(collection)},
           _operation{operation},
-          _filter(opNode["Filter"].to<DocumentGenerator>(context, id)) {}
+          _filter(opNode["Filter"].to<DocumentGenerator>(context, id)),
+          _options{opNode["OperationOptions"].maybe<mongocxx::options::delete_options>().value_or(
+              mongocxx::options::delete_options{})} {}
 
     mongocxx::model::write getModel() override {
         auto filter = _filter();
@@ -786,7 +629,11 @@ struct FindOperation : public BaseOperation {
           _onSession{onSession},
           _collection{std::move(collection)},
           _operation{operation},
-          _filter{opNode["Filter"].to<DocumentGenerator>(context, id)} {}
+          _filter{opNode["Filter"].to<DocumentGenerator>(context, id)} {
+        if (opNode["Options"]) {
+            _options = opNode["Options"].to<mongocxx::options::find>();
+        }
+    }
 
     void run(mongocxx::client_session& session) override {
         auto filter = _filter();
@@ -801,6 +648,44 @@ struct FindOperation : public BaseOperation {
         });
     }
 
+
+private:
+    bool _onSession;
+    mongocxx::collection _collection;
+    mongocxx::options::find _options;
+    DocumentGenerator _filter;
+    metrics::Operation _operation;
+};
+
+struct FindOneOperation : public BaseOperation {
+    FindOneOperation(const Node& opNode,
+                     bool onSession,
+                     mongocxx::collection collection,
+                     metrics::Operation operation,
+                     PhaseContext& context,
+                     ActorId id)
+        : BaseOperation(context, opNode),
+          _onSession{onSession},
+          _collection{std::move(collection)},
+          _operation{operation},
+          _filter{opNode["Filter"].to<DocumentGenerator>(context, id)} {
+        if (opNode["Options"]) {
+            _options = opNode["Options"].to<mongocxx::options::find>();
+        }
+    }
+
+    void run(mongocxx::client_session& session) override {
+        auto filter = _filter();
+        this->doBlock(_operation, [&](metrics::OperationContext& ctx) {
+            auto result = (_onSession) ? _collection.find_one(session, filter.view(), _options)
+                                       : _collection.find_one(filter.view(), _options);
+            if (result) {
+                ctx.addDocuments(1);
+                ctx.addBytes(result->view().length());
+            }
+            return std::make_optional(std::move(filter));
+        });
+    }
 
 private:
     bool _onSession;
@@ -1056,6 +941,86 @@ private:
 /**
  * Example usage:
  *    Operations:
+ *    - OperationName: withTransaction
+ *      OperationCommand:
+ *        OperationsInTransaction:
+ *          - OperationName: insertOne
+ *            OperationCommand:
+ *              Document: {a: 100}
+ *          - OperationName: findOneAndReplace
+ *            OperationCommand:
+ *              Filter: {a: 100}
+ *              Replacement: {a: 30}
+ */
+
+struct WithTransactionOperation : public BaseOperation {
+
+    WithTransactionOperation(const Node& opNode,
+                             bool onSession,
+                             mongocxx::collection collection,
+                             metrics::Operation operation,
+                             PhaseContext& context,
+                             ActorId id)
+        : BaseOperation(context, opNode),
+          _onSession{onSession},
+          _collection{std::move(collection)},
+          _operation{operation} {
+        auto& opsInTxn = opNode["OperationsInTransaction"];
+        if (!opsInTxn.isSequence()) {
+            BOOST_THROW_EXCEPTION(InvalidConfigurationException(
+                "'WithTransaction' requires an 'OperationsInTransaction' node of sequence type."));
+        }
+        for (const auto&& [k, txnOp] : opsInTxn) {
+            createTxnOps(txnOp, context, id);
+        }
+        if (opNode["Options"]) {
+            _options = opNode["Options"].to<mongocxx::options::transaction>();
+        }
+    }
+
+    void run(mongocxx::client_session& session) override {
+        auto run_txn_ops([&](mongocxx::client_session* session) {
+            for (auto&& op : _txnOps) {
+                op->run(*session);
+            }
+        });
+        this->doBlock(_operation, [&](metrics::OperationContext& ctx) {
+            session.with_transaction(run_txn_ops, _options);
+            return std::nullopt;
+        });
+    }
+
+private:
+    void createTxnOps(const Node& txnOp, PhaseContext& context, ActorId id) {
+        auto opName = txnOp["OperationName"].to<std::string>();
+        // MongoDB does not support transactions within transactions.
+        std::set<std::string> excludeSet = {
+            "startTransaction", "commitTransaction", "withTransaction"};
+        if (excludeSet.find(opName) != excludeSet.end()) {
+            BOOST_THROW_EXCEPTION(InvalidConfigurationException(
+                "Operation '" + opName + "' not supported inside a 'with_transaction' operation."));
+        }
+        auto opConstructors = getOpConstructors();
+        auto opConstructor = opConstructors.find(opName);
+        if (opConstructor == opConstructors.end()) {
+            BOOST_THROW_EXCEPTION(InvalidConfigurationException(
+                "Operation '" + opName + "' not supported inside a 'with_transaction' operation."));
+        }
+        auto createOp = opConstructor->second;
+        auto& yamlCommand = txnOp["OperationCommand"];
+        _txnOps.push_back(createOp(yamlCommand, _onSession, _collection, _operation, context, id));
+    }
+
+    mongocxx::collection _collection;
+    bool _onSession;
+    metrics::Operation _operation;
+    mongocxx::options::transaction _options;
+    std::vector<std::unique_ptr<BaseOperation>> _txnOps;
+};
+
+/**
+ * Example usage:
+ *    Operations:
  *    - OperationName: setReadConcern
  *      OperationCommand:
  *        ReadConcern:
@@ -1129,28 +1094,34 @@ private:
     mongocxx::write_concern _wc;
 };
 
-// Maps the yaml 'OperationName' string to the appropriate constructor of 'BaseOperation' type.
-std::unordered_map<std::string, OpCallback&> opConstructors = {
-    {"bulkWrite", baseCallback<BaseOperation, OpCallback, BulkWriteOperation>},
-    {"countDocuments", baseCallback<BaseOperation, OpCallback, CountDocumentsOperation>},
-    {"estimatedDocumentCount",
-     baseCallback<BaseOperation, OpCallback, EstimatedDocumentCountOperation>},
-    {"createIndex", baseCallback<BaseOperation, OpCallback, CreateIndexOperation>},
-    {"find", baseCallback<BaseOperation, OpCallback, FindOperation>},
-    {"findOneAndUpdate", baseCallback<BaseOperation, OpCallback, FindOneAndUpdateOperation>},
-    {"findOneAndDelete", baseCallback<BaseOperation, OpCallback, FindOneAndDeleteOperation>},
-    {"findOneAndReplace", baseCallback<BaseOperation, OpCallback, FindOneAndReplaceOperation>},
-    {"insertMany", baseCallback<BaseOperation, OpCallback, InsertManyOperation>},
-    {"startTransaction", baseCallback<BaseOperation, OpCallback, StartTransactionOperation>},
-    {"commitTransaction", baseCallback<BaseOperation, OpCallback, CommitTransactionOperation>},
-    {"setReadConcern", baseCallback<BaseOperation, OpCallback, SetReadConcernOperation>},
-    {"drop", baseCallback<BaseOperation, OpCallback, DropOperation>},
-    {"insertOne", baseCallback<BaseOperation, OpCallback, InsertOneOperation>},
-    {"deleteOne", baseCallback<BaseOperation, OpCallback, DeleteOneOperation>},
-    {"deleteMany", baseCallback<BaseOperation, OpCallback, DeleteManyOperation>},
-    {"updateOne", baseCallback<BaseOperation, OpCallback, UpdateOneOperation>},
-    {"updateMany", baseCallback<BaseOperation, OpCallback, UpdateManyOperation>},
-    {"replaceOne", baseCallback<BaseOperation, OpCallback, ReplaceOneOperation>}};
+std::unordered_map<std::string, OpCallback&> getOpConstructors() {
+    // Maps the yaml 'OperationName' string to the appropriate constructor of 'BaseOperation' type.
+    std::unordered_map<std::string, OpCallback&> opConstructors = {
+        {"bulkWrite", baseCallback<BaseOperation, OpCallback, BulkWriteOperation>},
+        {"countDocuments", baseCallback<BaseOperation, OpCallback, CountDocumentsOperation>},
+        {"estimatedDocumentCount",
+         baseCallback<BaseOperation, OpCallback, EstimatedDocumentCountOperation>},
+        {"createIndex", baseCallback<BaseOperation, OpCallback, CreateIndexOperation>},
+        {"find", baseCallback<BaseOperation, OpCallback, FindOperation>},
+        {"findOne", baseCallback<BaseOperation, OpCallback, FindOneOperation>},
+        {"findOneAndUpdate", baseCallback<BaseOperation, OpCallback, FindOneAndUpdateOperation>},
+        {"findOneAndDelete", baseCallback<BaseOperation, OpCallback, FindOneAndDeleteOperation>},
+        {"findOneAndReplace", baseCallback<BaseOperation, OpCallback, FindOneAndReplaceOperation>},
+        {"insertMany", baseCallback<BaseOperation, OpCallback, InsertManyOperation>},
+        {"startTransaction", baseCallback<BaseOperation, OpCallback, StartTransactionOperation>},
+        {"commitTransaction", baseCallback<BaseOperation, OpCallback, CommitTransactionOperation>},
+        {"withTransaction", baseCallback<BaseOperation, OpCallback, WithTransactionOperation>},
+        {"setReadConcern", baseCallback<BaseOperation, OpCallback, SetReadConcernOperation>},
+        {"drop", baseCallback<BaseOperation, OpCallback, DropOperation>},
+        {"insertOne", baseCallback<BaseOperation, OpCallback, InsertOneOperation>},
+        {"deleteOne", baseCallback<BaseOperation, OpCallback, DeleteOneOperation>},
+        {"deleteMany", baseCallback<BaseOperation, OpCallback, DeleteManyOperation>},
+        {"updateOne", baseCallback<BaseOperation, OpCallback, UpdateOneOperation>},
+        {"updateMany", baseCallback<BaseOperation, OpCallback, UpdateManyOperation>},
+        {"replaceOne", baseCallback<BaseOperation, OpCallback, ReplaceOneOperation>}};
+
+    return opConstructors;
+}
 
 // Equivalent to `nvl(phase[Database], actor[Database])`.
 std::string getDbName(const PhaseContext& phaseContext) {
@@ -1163,65 +1134,402 @@ std::string getDbName(const PhaseContext& phaseContext) {
     return phaseDb ? *phaseDb : *actorDb;
 }
 
+enum class Units { kNanosecond, kMicrosecond, kMillisecond, kSecond, kMinute, kHour };
+// represent a random delay
+class Delay {
+public:
+    Delay(const Node& node, GeneratorArgs args)
+        : numberGenerator{makeDoubleGenerator(node["^TimeSpec"]["value"], args)} {
+        auto unitString = node["^TimeSpec"]["units"].maybe<std::string>().value_or("seconds");
+
+        // Use string::find here so plurals get parsed correctly.
+        if (unitString.find("nanosecond") == 0) {
+            units = Units::kNanosecond;
+        } else if (unitString.find("microsecond") == 0) {
+            units = Units::kMicrosecond;
+        } else if (unitString.find("millisecond") == 0) {
+            units = Units::kMillisecond;
+        } else if (unitString.find("second") == 0) {
+            units = Units::kSecond;
+        } else if (unitString.find("minute") == 0) {
+            units = Units::kMinute;
+        } else if (unitString.find("hour") == 0) {
+            units = Units::kHour;
+        } else {
+            std::stringstream msg;
+            msg << "Invalid unit: " << unitString << " for genny::TimeSpec field in config";
+            throw genny::InvalidConfigurationException(msg.str());
+        }
+    }
+
+    // Evaluate the generator to produce a random delay.
+    Duration evaluate() {
+        auto value = numberGenerator.evaluate();
+        switch (units) {
+            case Units::kNanosecond:
+                return (std::chrono::duration_cast<Duration>(
+                    std::chrono::duration<double, std::nano>(value)));
+                break;
+            case Units::kMicrosecond:
+                return (std::chrono::duration_cast<Duration>(
+                    std::chrono::duration<double, std::nano>(value)));
+                break;
+            case Units::kMillisecond:
+                return (std::chrono::duration_cast<Duration>(
+                    std::chrono::duration<double, std::milli>(value)));
+                break;
+            case Units::kSecond:
+                return (std::chrono::duration_cast<Duration>(std::chrono::duration<double>(value)));
+                break;
+            case Units::kMinute:
+                return (std::chrono::duration_cast<Duration>(
+                    std::chrono::duration<double, std::ratio<60>>(value)));
+                break;
+            case Units::kHour:
+                return (std::chrono::duration_cast<Duration>(
+                    std::chrono::duration<double, std::ratio<3600>>(value)));
+                break;
+        }
+    }
+
+private:
+    TypeGenerator<double> numberGenerator;
+    Units units;
+};
+
+struct Transition {
+    int nextState;
+    Delay delay;
+};
+
+// Represents one state in an FSM.
+class State {
+public:
+    std::vector<std::unique_ptr<BaseOperation>> operations;
+    std::string stateName;
+    std::vector<double> transitionWeights;
+    std::vector<Transition> transitions;
+
+    template <typename A>
+    State(const Node& node,
+          const std::unordered_map<std::string, int>& states,
+          PhaseContext& phaseContext,
+          ActorId id,
+          A&& addOperation)
+        : operations{node.getPlural<std::unique_ptr<BaseOperation>>(
+              "Operation", "Operations", addOperation)},
+          stateName{node["Name"].to<std::string>()} {
+        for (const auto&& [k, transitionYaml] : node["Transitions"]) {
+            if (!transitionYaml["Weight"] || !transitionYaml["Weight"].isScalar()) {
+                BOOST_THROW_EXCEPTION(
+                    InvalidConfigurationException("Each transition must have a scalar weight"));
+            }
+            if (!transitionYaml["To"] || !transitionYaml["To"].isScalar()) {
+                BOOST_THROW_EXCEPTION(
+                    InvalidConfigurationException("Each transition must have a scalar 'To' entry"));
+            }
+            transitionWeights.emplace_back(transitionYaml["Weight"].template to<double>());
+            transitions.emplace_back(Transition{
+                states.at(transitionYaml["To"].template to<std::string>()),
+                Delay(transitionYaml["SleepBefore"], GeneratorArgs{phaseContext.rng(id), id})});
+        }
+    }
+};
+
+// Helper struct to encapsulate state based behavior
+struct StateMachine {
+    PhaseContext& phaseContext;
+
+    std::vector<State> states;
+    std::vector<double> initialStateWeights;
+
+    bool continueCurrentState;
+    bool skipFirstOperations;
+    bool skip;
+
+    int currentState;
+    int nextState;
+
+    ActorId actorId;
+
+    explicit StateMachine(PhaseContext& phaseContext, ActorId actorId)
+        : phaseContext{phaseContext},
+          states{},
+          initialStateWeights{},
+          continueCurrentState{phaseContext["Continue"].maybe<bool>().value_or(false)},
+          skipFirstOperations{phaseContext["SkipFirstOperations"].maybe<bool>().value_or(false)},
+          skip{false},
+          currentState{0},
+          nextState{0},
+          actorId{actorId} {}
+
+    template <typename F>
+    void setup(F&& addOperation) {
+        // Check if we have Operations or States. Throw an error if we have both.
+        if ((phaseContext["Operations"] || phaseContext["Operation"]) && phaseContext["States"]) {
+            BOOST_THROW_EXCEPTION(InvalidConfigurationException(
+                "CrudActor has Operations and States at the same time."));
+        }
+
+        if (!phaseContext["States"]) {
+            return;
+        }
+
+        int i = 0;
+        std::unordered_map<std::string, int> stateNames;
+        for (auto [k, state] : phaseContext["States"]) {
+            if (!state["Name"] || !state["Name"].isScalar()) {
+                BOOST_THROW_EXCEPTION(InvalidConfigurationException(
+                    "Each state must have a name and it must be a string"));
+            }
+            stateNames.emplace(state["Name"].template to<std::string>(), i);
+            i++;
+        }
+
+        auto numStates = stateNames.size();
+
+        if (continueCurrentState) {
+            // Check that this isn't phase 0
+            auto myPhaseNumber = phaseContext.getPhaseNumber();
+            if (myPhaseNumber == 0) {
+                BOOST_THROW_EXCEPTION(InvalidConfigurationException(
+                    "CrudActor has continue set for Phase 0. Nothing to continue from."));
+            }
+            // TODO: check that the previous state has <= number of states as this one
+            // Need to access the previous phase config.
+
+        } else if (!phaseContext["InitialStates"]) {
+            BOOST_THROW_EXCEPTION(InvalidConfigurationException(
+                "CrudActor has States, but has not specified InitialStates"));
+        }
+
+        states.reserve(numStates);
+        for (auto [k, stateNode] : phaseContext["States"]) {
+            states.emplace_back<State>(
+                {stateNode, stateNames, phaseContext, actorId, addOperation});
+        }
+
+        initialStateWeights = std::vector<double>(numStates, 0);
+        for (auto [k, state] : phaseContext["InitialStates"]) {
+            initialStateWeights[stateNames[state["State"].template to<std::string>()]] +=
+                state["Weight"].template to<double>();
+        }
+    }
+
+    auto& operations() {
+        return states[currentState].operations;
+    }
+
+    auto transitionDelay(int transition) {
+        return states[currentState].transitions[transition].delay.evaluate();
+    }
+
+    template <typename S>
+    std::optional<Duration> run(S& session, DefaultRandom& rng) {
+        if (!active()) {
+            return std::nullopt;
+        }
+        // Simplifying Assumption -- one shot operations on state enter
+        // We are here to fire those operations, and then pick the next state.
+        // transition to the next state
+        currentState = nextState;
+
+        BOOST_LOG_TRIVIAL(debug) << "Actor " << actorId << " running in state " << currentState;
+
+
+        // run the operations for the next state  unless  we have set to skip the first set
+        // of operations
+        if (!skip) {
+            BOOST_LOG_TRIVIAL(debug)
+                << "Actor " << actorId << " running operations for state " << currentState;
+            for (auto&& op : operations()) {
+                op->run(session);
+            }
+        } else {
+            skip = false;
+        }
+
+        auto transition = pickNext(rng);
+        auto delay = transitionDelay(transition);
+
+        return {delay};
+    }
+
+    [[nodiscard]] bool active() const {
+        return !states.empty();
+    }
+
+    [[nodiscard]] int pickNext(DefaultRandom& rng) {
+        auto distribution =
+            boost::random::discrete_distribution(states[currentState].transitionWeights);
+        int transition = distribution(rng);
+        nextState = states[currentState].transitions[transition].nextState;
+        return transition;
+    }
+
+    void onNewPhase(bool nop, DefaultRandom& rng) {
+        skip = false;
+        // TODO: If running without states, define a single state with the operations
+        if (!nop && !states.empty()) {
+            if (!continueCurrentState) {
+                // pick the initial state for the phase
+                auto initial_distribution =
+                    boost::random::discrete_distribution(initialStateWeights);
+                nextState = initial_distribution(rng);
+                BOOST_LOG_TRIVIAL(debug)
+                    << "Actor " << actorId << " picking initial state " << nextState;
+            } else {
+                // continue from the previous phase
+                nextState = currentState;
+                BOOST_LOG_TRIVIAL(debug)
+                    << "Actor " << actorId << " continuing from previous state " << nextState;
+            }
+            if (skipFirstOperations) {
+                skip = true;
+            }
+        }
+    }
+};
+
+
 }  // namespace
 
 namespace genny::actor {
 
+struct CrudActor::CollectionName {
+    std::optional<std::string> collectionName;
+    std::optional<int64_t> numCollections;
+    explicit CollectionName(PhaseContext& phaseContext)
+        : collectionName{phaseContext["Collection"].maybe<std::string>()},
+          numCollections{phaseContext["CollectionCount"].maybe<IntegerSpec>()} {
+        if (collectionName && numCollections) {
+            BOOST_THROW_EXCEPTION(InvalidConfigurationException(
+                "Collection or CollectionCount, not both in Crud Actor."));
+        }
+        if (!collectionName && !numCollections) {
+            BOOST_THROW_EXCEPTION(InvalidConfigurationException(
+                "One of Collection or CollectionCount must be provided in Crud Actor."));
+        }
+    }
+    // Get the assigned collection name or generate a name based on collectionCount and the
+    // the actorId.
+    std::string generateName(ActorId id) {
+        if (collectionName) {
+            return collectionName.value();
+        }
+        auto collectionNumber = id % numCollections.value();
+        return "Collection" + std::to_string(collectionNumber);
+    }
+};
 struct CrudActor::PhaseConfig {
-    mongocxx::collection collection;
     std::vector<std::unique_ptr<BaseOperation>> operations;
     metrics::Operation metrics;
+    StateMachine fsm;
+    std::string dbName;
+    CrudActor::CollectionName collectionName;
+
+    std::unique_ptr<BaseOperation> addOperation(const Node& node,
+                                                mongocxx::pool::entry& client,
+                                                const std::string& name,
+                                                PhaseContext& phaseContext,
+                                                ActorId id) const {
+        auto collection = (*client)[dbName][name];
+        auto& yamlCommand = node["OperationCommand"];
+        auto opName = node["OperationName"].to<std::string>();
+        auto opMetricsName = node["OperationMetricsName"].maybe<std::string>().value_or(opName);
+        auto onSession = yamlCommand["OnSession"].maybe<bool>().value_or(false);
+
+        auto opConstructors = getOpConstructors();
+        // Grab the appropriate Operation struct defined by 'OperationName'.
+        auto op = opConstructors.find(opName);
+        if (op == opConstructors.end()) {
+            BOOST_THROW_EXCEPTION(InvalidConfigurationException("Operation '" + opName +
+                                                                "' not supported in Crud Actor."));
+        }
+
+        // If the yaml specified MetricsName in the Phase block, then associate the metrics
+        // with the Phase; otherwise, associate with the Actor (e.g. all bulkWrite
+        // operations get recorded together across all Phases). The latter case (not
+        // specifying MetricsName) is legacy configuration-syntax.
+        //
+        // Node is convertible to bool but only explicitly.
+        const bool perPhaseMetrics = bool(phaseContext["MetricsName"]);
+        auto opCreator = op->second;
+
+        if (auto metricsName = phaseContext["MetricsName"].maybe<std::string>();
+            metricsName && opMetricsName != opName) {
+            // Special case if we have set MetricsName at the phase level, and OperationMetricsName
+            // on the operation. Ideally the operation constructors would directly support this
+            // functionality, and be common to all actors. At the time this was added, it was
+            // non-trivial to do so in a non-breaking fashion.
+            std::ostringstream stm;
+            stm << *metricsName << "." << opMetricsName;
+
+            return opCreator(yamlCommand,
+                             onSession,
+                             collection,
+                             phaseContext.actor().operation(stm.str(), id),
+                             phaseContext,
+                             id);
+        }
+
+        return opCreator(yamlCommand,
+                         onSession,
+                         collection,
+                         perPhaseMetrics ? phaseContext.operation(opMetricsName, id)
+                                         : phaseContext.actor().operation(opMetricsName, id),
+                         phaseContext,
+                         id);
+    }
 
     PhaseConfig(PhaseContext& phaseContext, mongocxx::pool::entry& client, ActorId id)
-        : collection{(
-              *client)[getDbName(phaseContext)][phaseContext["Collection"].to<std::string>()]},
-          metrics{phaseContext.actor().operation("Crud", id)} {
-        auto addOperation = [&](const Node& node) -> std::unique_ptr<BaseOperation> {
-            auto& yamlCommand = node["OperationCommand"];
-            auto opName = node["OperationName"].to<std::string>();
-            auto onSession = yamlCommand["OnSession"].maybe<bool>().value_or(false);
+        : dbName{getDbName(phaseContext)},
+          metrics{phaseContext.actor().operation("Crud", id)},
+          fsm{phaseContext, id},
+          collectionName{phaseContext} {
 
-            // Grab the appropriate Operation struct defined by 'OperationName'.
-            auto op = opConstructors.find(opName);
-            if (op == opConstructors.end()) {
-                BOOST_THROW_EXCEPTION(InvalidConfigurationException(
-                    "Operation '" + opName + "' not supported in Crud Actor."));
-            }
-
-            // If the yaml specified MetricsName in the Phase block, then associate the metrics
-            // with the Phase; otherwise, associate with the Actor (e.g. all bulkWrite operations
-            // get recorded together across all Phases). The latter case (not specifying
-            // MetricsName) is legacy configuration-syntax.
-            //
-            // Node is convertible to bool but only explicitly so need to do the odd-looking
-            // `? true : false` thing.
-            const bool perPhaseMetrics = phaseContext["MetricsName"] ? true : false;
-
-            auto createOperation = op->second;
-            return createOperation(yamlCommand,
-                                   onSession,
-                                   collection,
-                                   perPhaseMetrics ? phaseContext.operation(opName, id)
-                                                   : phaseContext.actor().operation(opName, id),
-                                   phaseContext,
-                                   id);
+        auto name = collectionName.generateName(id);
+        auto addOpCallback = [&](const Node& node) -> std::unique_ptr<BaseOperation> {
+            return addOperation(node, client, name, phaseContext, id);
         };
+        fsm.setup(addOpCallback);
 
-        operations = phaseContext.getPlural<std::unique_ptr<BaseOperation>>(
-            "Operation", "Operations", addOperation);
+        if (phaseContext["Operations"] || phaseContext["Operation"]) {
+            if (phaseContext["Continue"]) {
+                BOOST_THROW_EXCEPTION(
+                    InvalidConfigurationException("Continue option not valid if not using States"));
+            }
+            if (phaseContext["SkipFirstOperations"]) {
+                BOOST_THROW_EXCEPTION(InvalidConfigurationException(
+                    "SkipFirstOperations option not valid if not using States"));
+            }
+            operations = phaseContext.getPlural<std::unique_ptr<BaseOperation>>(
+                "Operation", "Operations", addOpCallback);
+        } else if (!phaseContext["States"]) {  // Throw a useful error
+            BOOST_THROW_EXCEPTION(
+                InvalidConfigurationException("CrudActor has neither Operations nor States "
+                                              "specified. Exactly one must be defined."));
+        }
     }
 };
 
 void CrudActor::run() {
     for (auto&& config : _loop) {
+        auto session = _client->start_session();
+        if (!config.isNop()) {
+            config->fsm.onNewPhase(config.isNop(), _rng);
+        }
         for (const auto&& _ : config) {
             auto metricsContext = config->metrics.start();
-
-            auto session = _client->start_session();
-            for (auto&& op : config->operations) {
-                op->run(session);
+            // std::optionals (like `delay`) convert to boolean true iff their value is present.
+            if (auto delay = config->fsm.run(session, _rng); delay) {
+                config.sleepNonBlocking(*delay);
+            } else {
+                BOOST_LOG_TRIVIAL(debug) << "Actor " << id() << " running regular (non-fsm)";
+                for (auto&& op : config->operations) {
+                    op->run(session);
+                }
             }
-
             metricsContext.success();
         }
     }
@@ -1229,8 +1537,10 @@ void CrudActor::run() {
 
 CrudActor::CrudActor(genny::ActorContext& context)
     : Actor(context),
-      _client{std::move(context.client())},
-      _loop{context, _client, CrudActor::id()} {}
+      _client{std::move(
+          context.client(context.get("ClientName").maybe<std::string>().value_or("Default")))},
+      _loop{context, _client, CrudActor::id()},
+      _rng{context.workload().getRNGForThread(CrudActor::id())} {}
 
 namespace {
 auto registerCrudActor = Cast::registerDefault<CrudActor>();

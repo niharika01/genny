@@ -1,4 +1,6 @@
 SchemaVersion: 2018-07-01
+Description: |
+  TODO: TIG-3318
 
 Clients:
   Default:
@@ -10,7 +12,7 @@ Actors:
   Type: Loader
   Threads: 1
   Phases:
-  - ExternalPhaseConfig:
+  - LoadConfig:
       Path: &PhasePath ../../phases/scale/DesignDocWorkloadPhases.yml
       Key: Loader
     Repeat: 1
@@ -22,10 +24,11 @@ Actors:
   Threads: 10
   Phases:
   - *Nop
-  - ExternalPhaseConfig:
+  - LoadConfig:
       Path: *PhasePath
       Key: Update
     Duration: &Duration 1 hour
+    MetricsName: Update
     GlobalRate: 10 per 1 millisecond  # Target is 10 operations on every millisecond.
 
 - Name: Query
@@ -33,7 +36,7 @@ Actors:
   Threads: 10
   Phases:
   - *Nop
-  - ExternalPhaseConfig:
+  - LoadConfig:
       Path: *PhasePath
       Key: Query
     Duration: *Duration
@@ -43,7 +46,7 @@ Actors:
   Threads: 2  # 2 threads for doing a two-minute query every minute.
   Phases:
   - *Nop
-  - ExternalPhaseConfig:
+  - LoadConfig:
       Path: *PhasePath
       Key: LargeQuery
       Parameters:

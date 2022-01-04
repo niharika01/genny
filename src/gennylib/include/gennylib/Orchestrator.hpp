@@ -21,12 +21,13 @@
 #include <shared_mutex>
 #include <vector>
 
+#include <gennylib/conventions.hpp>
+
 namespace genny {
 
-class Orchestrator;
+using SteadyClock = std::chrono::steady_clock;
 
-// May eventually want a proper type for Phase, but for now just a typedef is sufficient.
-using PhaseNumber = unsigned int;
+class Orchestrator;
 
 using OrchestratorCB = std::function<void(const Orchestrator*)>;
 
@@ -104,6 +105,17 @@ public:
      */
     bool continueRunning() const;
 
+    /**
+     * Sleep for the duration, also waking up if the phase changes before the
+     * duration passes.
+     */
+    void sleepToPhaseEnd(Duration timeout, const PhaseNumber pn);
+
+    /**
+     * Sleep until at most deadline, also waking up if the phase changes before the
+     * duration passes.
+     */
+    void sleepUntilOrPhaseEnd(SteadyClock::time_point deadline, const PhaseNumber pn);
 
 private:
     mutable std::shared_mutex _mutex;

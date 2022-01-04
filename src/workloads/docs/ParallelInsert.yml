@@ -1,5 +1,7 @@
 SchemaVersion: 2018-07-01
 Owner: "@mongodb/repl"
+Description: |
+  TODO: TIG-3321
 
 Clients:
   Default:
@@ -181,11 +183,13 @@ Actors:
   - *DropCollection
 
 AutoRun:
-  Requires:
+- When:
     mongodb_setup:
-    - replica
-    - replica-noflowcontrol
-  PrepareEnvironmentWith:
-    mongodb_setup:
-    - replica-delay-mixed
-    - replica
+      $eq:
+      - replica
+    branch_name:
+      $neq:
+      - v4.0
+  ThenRun:
+  - mongodb_setup: replica-delay-mixed
+  - mongodb_setup: replica

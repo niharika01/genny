@@ -3,8 +3,10 @@
 
 SchemaVersion: 2018-07-01
 Owner: "@mongodb/sharding"
+Description: |
+  TODO: TIG-3320
 
-Document: &Doc # The size of each document is about 2kb.
+Document: &Doc  # The size of each document is about 2kb.
   a: 1
   x: {^RandomInt: {min: 0, max: 2147483647}}
   string0: {^FastRandomString: {length: 2000}}
@@ -133,9 +135,11 @@ Actors:
   - *Nop
   - MetricsName: TotalModificationTime
     Repeat: 10000
-    Collection: &Coll Collection0 # This is the default collection populated by the Loader.
+    Collection: &Coll Collection0  # This is the default collection populated by the Loader.
+    ThrowOnFailure: false  # Transactions are allowed to fail.
+    RecordFailure: true  # We still want to record the metrics even if the transaction is rolled back.
     Operations:
-    - OperationName: startTransaction
+    - OperationName: withTransaction
       OperationCommand:
         Options:
           WriteConcern:
@@ -146,20 +150,20 @@ Actors:
           ReadPreference:
             ReadMode: primaryPreferred
             MaxStaleness: 1000 seconds
-    - OperationName: bulkWrite
-      OperationCommand:
-        WriteOperations:
-        - WriteCommand: deleteMany
-          Filter: {a: 1} 
-        Options:
-          Ordered: true
-          MaxTime: 0
-        OnSession: true
-    - OperationName: insertMany
-      OperationCommand:
-        Documents: *DocumentList
-        OnSession: true
-    - OperationName: commitTransaction
+        OperationsInTransaction:
+        - OperationName: bulkWrite
+          OperationCommand:
+            WriteOperations:
+            - WriteCommand: deleteMany
+              Filter: {a: 1}
+            Options:
+              Ordered: true
+              MaxTime: 0
+            OnSession: true
+        - OperationName: insertMany
+          OperationCommand:
+            Documents: *DocumentList
+            OnSession: true
   - Repeat: 1
     Collection: *Coll
     Operation:

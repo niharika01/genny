@@ -1,8 +1,0 @@
-*.pyc
-venv
-__pycache__
-*.egg-info
-.eggs
-nosetests.xml
-build
-dist

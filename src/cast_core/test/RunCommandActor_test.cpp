@@ -48,6 +48,8 @@ const auto dropAdminTestCollConfig = YAML::Load(R"(
         - OperationName: AdminCommand
           OperationCommand:
             drop: testCollection
+    Metrics:
+      Format: csv
 )");
 
 // Don't run in a sharded cluster because the error message is different.
@@ -66,6 +68,8 @@ TEST_CASE_METHOD(MongoTestFixture,
             Operation:
               OperationName: RunCommand
               OperationCommand: {someKey: 1}
+        Metrics:
+          Format: csv
     )",
                       "");
 
@@ -112,6 +116,8 @@ TEST_CASE_METHOD(MongoTestFixture, "InsertActor respects writeConcern.", "[three
                         documents: [{name: myName}]
                         writeConcern: {wtimeout: 5000}
 
+            Metrics:
+              Format: csv 
         )");
     };
 
@@ -220,6 +226,8 @@ TEST_CASE_METHOD(MongoTestFixture,
                   OperationCommand:
                     insert: testCollection
                     documents: [{rating: 10}]
+            Metrics:
+              Format: csv
         )");
         auto builder = bson_stream::document{};
         bsoncxx::document::value doc_value = builder << "rating" << 10 << bson_stream::finalize;
@@ -245,10 +253,12 @@ TEST_CASE_METHOD(MongoTestFixture,
               Phases:
               - Repeat: 1
                 Operations: 5
+            Metrics:
+              Format: csv
         )");
         NodeSource ns{YAML::Dump(config), ""};
-        REQUIRE_THROWS_AS(ActorHelper(ns.root(), 1, MongoTestFixture::connectionUri().to_string()),
-                          InvalidKeyException);
+        REQUIRE_THROWS_WITH(ActorHelper(ns.root(), 1, MongoTestFixture::connectionUri().to_string()), 
+                Catch::Contains("Plural 'Operations' must be a sequence type"));
     }
 
     SECTION("Insert a single document using the 'Operation' key name.") {
@@ -267,6 +277,8 @@ TEST_CASE_METHOD(MongoTestFixture,
                   OperationCommand:
                     insert: testCollection
                     documents: [{rating: 10}]
+            Metrics:
+              Format: csv
         )");
         auto builder = bson_stream::document{};
         bsoncxx::document::value doc_value = builder << "rating" << 10 << bson_stream::finalize;
@@ -297,6 +309,8 @@ TEST_CASE_METHOD(MongoTestFixture,
                     query: {rating: {^RandomInt: {min: 1, max: 4}}}
                     update: {$set: {rating: {^RandomInt: {min: 5, max: 10}}}}
                     upsert: true
+            Metrics:
+              Format: csv
         )");
         auto builder = bson_stream::document{};
         bsoncxx::document::value doc_value = builder << "rating" << bson_stream::open_document
@@ -331,10 +345,12 @@ TEST_CASE_METHOD(MongoTestFixture,
                 OperationCommand:
                   insert: testCollection
                   documents: [{rating: 10}]
+            Metrics:
+              Format: csv
         )");
         NodeSource ns{YAML::Dump(config), ""};
-        REQUIRE_THROWS_AS(ActorHelper(ns.root(), 1, MongoTestFixture::connectionUri().to_string()),
-                          InvalidKeyException);
+        REQUIRE_THROWS_WITH(ActorHelper(ns.root(), 1, MongoTestFixture::connectionUri().to_string()), 
+                Catch::Contains("Either 'Operation' or 'Operations' required."));
     }
 
     SECTION("Database should default to 'admin' when not specified in the the config.") {
@@ -352,6 +368,8 @@ TEST_CASE_METHOD(MongoTestFixture,
                   OperationCommand:
                     insert: testCollection
                     documents: [{rating: 10}]
+            Metrics:
+              Format: csv
         )");
         auto builder = bson_stream::document{};
         bsoncxx::document::value doc_value = builder << "rating" << 10 << bson_stream::finalize;
@@ -399,6 +417,8 @@ TEST_CASE_METHOD(MongoTestFixture,
                   OperationName: AdminCommand
                   OperationCommand:
                     create: testCollection
+            Metrics:
+              Format: csv
         )");
         NodeSource ns{YAML::Dump(config), ""};
 
@@ -431,6 +451,8 @@ TEST_CASE_METHOD(MongoTestFixture,
                   OperationName: AdminCommand
                   OperationCommand:
                     create: testCollection
+            Metrics:
+              Format: csv
         )");
         NodeSource ns{YAML::Dump(config), ""};
         ActorHelper ah(ns.root(), 1, MongoTestFixture::connectionUri().to_string());
@@ -463,11 +485,13 @@ TEST_CASE_METHOD(MongoTestFixture,
                   OperationName: AdminCommand
                   OperationCommand:
                     create: testCollection
+            Metrics:
+              Format: csv
         )",
                           "");
-        REQUIRE_THROWS_AS(
-            ActorHelper(config.root(), 1, MongoTestFixture::connectionUri().to_string()),
-            InvalidConfigurationException);
+
+        REQUIRE_THROWS_WITH(ActorHelper(config.root(), 1, MongoTestFixture::connectionUri().to_string()), 
+                Catch::Contains("AdminCommands can only be run on the 'admin' database"));
     }
 }
 
@@ -500,6 +524,8 @@ TEST_CASE_METHOD(MongoTestFixture,
                     documents:
                     - {rating: {^RandomInt: {min: 10, max: 10}}, name: y}
                     - {rating: 10, name: x}
+            Metrics:
+              Format: csv
         )",
                           "");
         auto builder = bson_stream::document{};
@@ -531,6 +557,8 @@ TEST_CASE_METHOD(MongoTestFixture,
                 - OperationName: AdminCommand
                   OperationCommand:
                     drop: testCollection
+            Metrics:
+              Format: csv
         )",
                           "");
         ActorHelper ah(config.root(), 1, MongoTestFixture::connectionUri().to_string());
@@ -560,11 +588,12 @@ TEST_CASE_METHOD(MongoTestFixture,
                   OperationCommand:
                     insert: testCollection
                     documents: [{rating: 15}]
+            Metrics:
+              Format: csv
         )",
                           "");
-        REQUIRE_THROWS_AS(
-            ActorHelper(config.root(), 1, MongoTestFixture::connectionUri().to_string()),
-            InvalidKeyException);
+        REQUIRE_THROWS_WITH(ActorHelper(config.root(), 1, MongoTestFixture::connectionUri().to_string()), 
+                Catch::Contains("Can't have both 'Operation' and 'Operations'."));
     }
 }
 
@@ -592,6 +621,8 @@ TEST_CASE_METHOD(MongoTestFixture,
                     insert: testCollection
                     documents: [{rating: 10}]
                   OperationMetricsName: InsertMetric
+            Metrics:
+              Format: csv
         )",
                           "");
 
@@ -623,6 +654,8 @@ TEST_CASE_METHOD(MongoTestFixture,
                   OperationCommand:
                     insert: testCollection
                     documents: [{rating: 10}]
+            Metrics: 
+              Format: csv
         )",
                           "");
 
@@ -661,6 +694,8 @@ TEST_CASE_METHOD(MongoTestFixture,
                   OperationCommand:
                     create: testCollection2
                   OperationMetricsName: CreateCollectionMetric
+            Metrics:
+              Format: csv
         )",
                           "");
 
@@ -700,6 +735,8 @@ TEST_CASE_METHOD(MongoTestFixture,
                   OperationCommand:
                     create: testCollection2
                   OperationMetricsName: CreateCollectionMetric
+            Metrics:
+              Format: csv
         )",
                           "");
 

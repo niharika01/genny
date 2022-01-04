@@ -1,0 +1,58 @@
+SchemaVersion: 2018-07-01
+Owner: "@mongodb/product-perf"
+Description: |
+  TODO: TIG-3318
+
+dbname: &dbname mix
+runtime: &runtime 7 minutes
+DocumentCount: &NumDocs 100000
+CollectionCount: &NumColls 1
+
+Filter: &filter {id: {^RandomInt: {min: 0, max: *NumDocs}}}
+string: &string {^FastRandomString: {length: 50}}
+Document: &doc
+  id: {^RandomInt: {min: 0, max: *NumDocs}}
+  a: {^RandomInt: {min: 0, max: *NumDocs}}
+  # Note that in the original workload the string c was perfectly compressable.
+  # We can put a constant there if needed.
+  c: *string
+
+UpdatePhase:
+  Duration: *runtime
+  RecordFailure: true
+  CollectionCount: *NumColls
+  Operations:
+  - OperationName: updateOne
+    OperationCommand:
+      Filter: *filter
+      Update:
+        $inc: {a: 1}
+        $set: {c: *string}
+
+RemovePhase:
+  Duration: *runtime
+  RecordFailure: true
+  CollectionCount: *NumColls
+  Operations:
+  - OperationName: deleteOne
+    OperationCommand:
+      Filter: *filter
+
+InsertPhase:
+  Duration: *runtime
+  RecordFailure: true
+  CollectionCount: *NumColls
+  Operations:
+  - OperationName: insertOne
+    OperationCommand:
+      Document: *doc
+
+FindPhase:
+  Duration: *runtime
+  RecordFailure: true
+  CollectionCount: *NumColls
+  Operations:
+  - OperationName: findOne
+    OperationCommand:
+      Filter: *filter
+

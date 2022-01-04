@@ -23,9 +23,16 @@
 #include <mongocxx/uri.hpp>
 
 #include <gennylib/Cast.hpp>
+#include <gennylib/parallel.hpp>
+#include <gennylib/v1/Sleeper.hpp>
 #include <metrics/metrics.hpp>
 
+
 namespace genny {
+
+// Default value selected from random.org, by selecting 2 random numbers
+// between 1 and 10^9 and concatenating.
+auto RNG_SEED_BASE = 269849313357703264;
 
 WorkloadContext::WorkloadContext(const Node& node,
                                  Orchestrator& orchestrator,
@@ -54,26 +61,35 @@ WorkloadContext::WorkloadContext(const Node& node,
     // Set the metrics format information.
     auto format = ((*this)["Metrics"]["Format"])
                       .maybe<metrics::MetricsFormat>()
-                      .value_or(metrics::MetricsFormat("cedar-csv"));
+                      .value_or(metrics::MetricsFormat("ftdc"));
+
+    if (format != genny::metrics::MetricsFormat("ftdc")) {
+        BOOST_LOG_TRIVIAL(info) << "Metrics format " << format.toString()
+                                << " is deprecated in favor of ftdc.";
+    }
+
     auto metricsPath =
-        ((*this)["Metrics"]["Path"]).maybe<std::string>().value_or("build/genny-metrics");
+        ((*this)["Metrics"]["Path"]).maybe<std::string>().value_or("build/WorkloadOutput/CedarMetrics");
+
     _registry = genny::metrics::Registry(std::move(format), std::move(metricsPath));
+
+    _seedGenerator.seed((*this)["RandomSeed"].maybe<long>().value_or(RNG_SEED_BASE));
 
     // Make a bunch of actor contexts
     for (const auto& [k, actor] : (*this)["Actors"]) {
         _actorContexts.emplace_back(std::make_unique<genny::ActorContext>(actor, *this));
     }
 
-    // Default value selected from random.org, by selecting 2 random numbers
-    // between 1 and 10^9 and concatenating.
-    _rng.seed((*this)["RandomSeed"].maybe<long>().value_or(269849313357703264));
+    ActorBucket bucket;
+    parallelRun(_actorContexts,
+                   [&](const auto& actorContext) {
+                       auto rawActors = _constructActors(cast, actorContext);
+                       for (auto&& actor : rawActors) {
+                           bucket.addItem(std::move(actor));
+                       }
+                   });
 
-    for (auto& actorContext : _actorContexts) {
-        for (auto&& actor : _constructActors(cast, actorContext)) {
-            _actors.push_back(std::move(actor));
-        }
-    }
-
+    _actors = std::move(bucket.extractItems());
     _done = true;
 }
 
@@ -92,7 +108,8 @@ ActorVector WorkloadContext::_constructActors(const Cast& cast,
         throw InvalidConfigurationException(stream.str());
     }
 
-    for (auto&& actor : producer->produce(*actorContext)) {
+    auto rawActors = producer->produce(*actorContext);
+    for (auto&& actor : rawActors) {
         actors.emplace_back(std::forward<std::unique_ptr<Actor>>(actor));
     }
     return actors;
@@ -102,13 +119,15 @@ mongocxx::pool::entry WorkloadContext::client(const std::string& name, size_t in
     return _poolManager.client(name, instance, this->_node);
 }
 
-v1::GlobalRateLimiter* WorkloadContext::getRateLimiter(const std::string& name,
-                                                       const RateSpec& spec) {
+GlobalRateLimiter* WorkloadContext::getRateLimiter(const std::string& name, const RateSpec& spec) {
     if (this->isDone()) {
-        BOOST_THROW_EXCEPTION(std::logic_error("Cannot create rate-limiters after setup"));
+        BOOST_THROW_EXCEPTION(
+            std::logic_error("Cannot create rate-limiters after setup. Name tried: " + name));
     }
+
+    std::lock_guard<std::mutex> lk(_limiterLock);
     if (_rateLimiters.count(name) == 0) {
-        _rateLimiters.emplace(std::make_pair(name, std::make_unique<v1::GlobalRateLimiter>(spec)));
+        _rateLimiters.emplace(std::make_pair(name, std::make_unique<GlobalRateLimiter>(spec)));
     }
     auto rl = _rateLimiters[name].get();
     rl->addUser();
@@ -119,19 +138,24 @@ v1::GlobalRateLimiter* WorkloadContext::getRateLimiter(const std::string& name,
     return rl;
 }
 
+
 DefaultRandom& WorkloadContext::getRNGForThread(ActorId id) {
     if (this->isDone()) {
         BOOST_THROW_EXCEPTION(std::logic_error("Cannot create RNGs after setup"));
     }
-    if (auto rng = _rngRegistry.find(id); rng == _rngRegistry.end()) {
-        auto [it, success] = _rngRegistry.try_emplace(id, _rng());
-        if (!success) {
-            // This should be impossible.
-            // But invariants don't hurt we only call this during setup
-            throw std::logic_error("Already have DefaultRandom for Actor " + std::to_string(id));
-        }
+
+    if (id < 1) {
+        BOOST_THROW_EXCEPTION(std::logic_error("ActorId must be 1 or greater."));
     }
-    return _rngRegistry[id];
+
+    return _rngRegistry[id - 1];
+}
+
+// Helper method that constructs all the IDs up to the given ID.
+void WorkloadContext::_constructRngsToId(ActorId id) {
+    for (auto i = _rngRegistry.size(); i < id; i++) {
+        _rngRegistry.emplace_back(_seedGenerator());
+    }
 }
 
 // Helper method to convert Phases:[...] to PhaseContexts
@@ -167,6 +191,14 @@ std::unordered_map<PhaseNumber, std::unique_ptr<PhaseContext>> ActorContext::con
     }
     actorContext->orchestrator().phasesAtLeastTo(out.size() - 1);
     return out;
+}
+
+// The SleepContext class is basically an actor-friendly adapter
+// for the Sleeper.
+void SleepContext::sleep_for(Duration duration) const {
+    // We don't care about the before/after op distinction here.
+    v1::Sleeper sleeper(duration, Duration::zero());
+    sleeper.before(_orchestrator, _phase);
 }
 
 bool PhaseContext::isNop() const {

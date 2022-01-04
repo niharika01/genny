@@ -288,6 +288,30 @@ Tests:
       $readPreference:
         mode: secondaryPreferred
 
+  - Description: Read preference is 'secondaryPreferred' in find.
+    Operations:
+      - OperationName: find
+        OperationCommand:
+          Filter: { a : 1 }
+          Options:
+            ReadPreference:
+              ReadMode: secondaryPreferred
+    ExpectAllEvents:
+      $readPreference:
+        mode: secondaryPreferred
+
+  - Description: Read preference is 'secondaryPreferred' in findOne.
+    Operations:
+      - OperationName: findOne
+        OperationCommand:
+          Filter: { a : 1 }
+          Options:
+            ReadPreference:
+              ReadMode: secondaryPreferred
+    ExpectAllEvents:
+      $readPreference:
+        mode: secondaryPreferred
+
   - Description: Read preference is 'nearest' with MaxStaleness set.
     Operations:
       - OperationName: countDocuments
@@ -547,4 +571,22 @@ Tests:
           Timeout: 6000 milliseconds
     OutcomeCounts:
       - Filter: {a: 1}
+        Count: 1
+
+  - Description: simple findOneAndReplace in a with_transaction
+    Operations:
+      - OperationName: withTransaction
+        OperationCommand:
+          OperationsInTransaction:
+            - OperationName: insertOne
+              OperationCommand:
+                Document: {a: 100}
+            - OperationName: findOneAndReplace
+              OperationCommand:
+                Filter: {a: 100}
+                Replacement: {a: 30}
+    OutcomeCounts:
+      - Filter: {a: 100}
+        Count: 0
+      - Filter: {a: 30}
         Count: 1
